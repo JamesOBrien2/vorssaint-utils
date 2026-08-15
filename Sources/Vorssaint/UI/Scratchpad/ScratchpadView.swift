@@ -307,18 +307,170 @@ private struct ScratchpadDragHandle: NSViewRepresentable {
     }
 }
 
-/// An AppKit text view configured as a pure plain-text surface: no smart
+/// The editor keeps Markdown source in the text storage while applying
+/// lightweight attributes on top. This gives the pad headings and task boxes
+/// without introducing a second rendered document or changing exported text.
+private final class MarkdownTextView: NSTextView {
+    private let baseFont = NSFont.systemFont(ofSize: 13)
+
+    func updateMarkdownAppearance() {
+        guard let storage = textStorage else { return }
+        let fullRange = NSRange(location: 0, length: storage.length)
+        storage.beginEditing()
+        if fullRange.length > 0 {
+            storage.setAttributes([
+                .font: baseFont,
+                .foregroundColor: NSColor.labelColor,
+            ], range: fullRange)
+        }
+
+        for run in MarkdownSupport.styleRuns(in: string) {
+            switch run.kind {
+            case .headingMarker(let level):
+                storage.addAttributes(headingAttributes(level: level), range: run.range)
+            case .headingText(let level):
+                storage.addAttributes(headingAttributes(level: level), range: run.range)
+            case .taskMarker(let checked):
+                // Keep the three source characters in the document, but draw
+                // one native-looking checkbox in place of their visible glyphs.
+                storage.addAttribute(.foregroundColor, value: NSColor.clear, range: run.range)
+                let attachment = NSTextAttachment()
+                attachment.image = Self.checkboxImage(checked: checked)
+                storage.addAttribute(.attachment,
+                                      value: attachment,
+                                      range: NSRange(location: run.range.location, length: 1))
+            case .taskText(let checked):
+                if checked {
+                    storage.addAttributes([
+                        .foregroundColor: NSColor.secondaryLabelColor,
+                        .strikethroughStyle: NSUnderlineStyle.single.rawValue,
+                    ], range: run.range)
+                }
+            }
+        }
+        storage.endEditing()
+        typingAttributes = [
+            .font: baseFont,
+            .foregroundColor: NSColor.labelColor,
+        ]
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let task = taskMarker(at: point),
+              let replacement = toggledMarker(in: string, range: task.range),
+              shouldChangeText(in: task.range, replacementString: replacement) else {
+            super.mouseDown(with: event)
+            return
+        }
+
+        replaceCharacters(in: task.range, with: replacement)
+        didChangeText()
+        updateMarkdownAppearance()
+    }
+
+    private func taskMarker(at point: NSPoint) -> (range: NSRange, checked: Bool)? {
+        let containerPoint = NSPoint(x: point.x - textContainerOrigin.x,
+                                     y: point.y - textContainerOrigin.y)
+        guard let layoutManager, let textContainer else { return nil }
+
+        for run in MarkdownSupport.styleRuns(in: string) {
+            guard case .taskMarker(let checked) = run.kind else { continue }
+            let glyphRange = layoutManager.glyphRange(forCharacterRange: run.range,
+                                                       actualCharacterRange: nil)
+            var bounds = layoutManager.boundingRect(forGlyphRange: glyphRange,
+                                                    in: textContainer)
+            bounds = bounds.insetBy(dx: -4, dy: -3)
+            if bounds.contains(containerPoint) {
+                return (run.range, checked)
+            }
+        }
+        return nil
+    }
+
+    private func toggledMarker(in text: String, range: NSRange) -> String? {
+        let source = text as NSString
+        guard range.location >= 0, NSMaxRange(range) <= source.length else { return nil }
+        guard let toggled = MarkdownSupport.toggled(in: text, at: range.location + 1),
+              let newRange = MarkdownSupport.markerRange(in: toggled, at: range.location + 1) else {
+            return nil
+        }
+        return (toggled as NSString).substring(with: newRange)
+    }
+
+    private func headingAttributes(level: Int) -> [NSAttributedString.Key: Any] {
+        let size: CGFloat
+        let weight: NSFont.Weight
+        let color: NSColor
+        switch level {
+        case 1:
+            size = 18
+            weight = .bold
+            color = .controlAccentColor
+        case 2:
+            size = 15
+            weight = .semibold
+            color = .systemTeal
+        default:
+            size = 13.5
+            weight = .semibold
+            color = .secondaryLabelColor
+        }
+        return [
+            .font: NSFont.systemFont(ofSize: size, weight: weight),
+            .foregroundColor: color,
+        ]
+    }
+
+    private static func checkboxImage(checked: Bool) -> NSImage {
+        let size = NSSize(width: 13, height: 13)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        let box = NSRect(x: 1, y: 1, width: 11, height: 11)
+        if checked {
+            NSColor.controlAccentColor.setFill()
+            NSBezierPath(roundedRect: box, xRadius: 2, yRadius: 2).fill()
+            NSColor.white.setStroke()
+            let check = NSBezierPath()
+            check.lineWidth = 1.5
+            check.move(to: NSPoint(x: 3.2, y: 6.4))
+            check.line(to: NSPoint(x: 5.5, y: 3.8))
+            check.line(to: NSPoint(x: 10, y: 9.2))
+            check.stroke()
+        } else {
+            NSColor.secondaryLabelColor.setStroke()
+            let path = NSBezierPath(roundedRect: box, xRadius: 2, yRadius: 2)
+            path.lineWidth = 1.2
+            path.stroke()
+        }
+        image.unlockFocus()
+        return image
+    }
+}
+
+/// An AppKit text view configured as a plain-text Markdown surface: no smart
 /// quotes or dashes, no substitutions, no rich paste, with undo. SwiftUI's
 /// editor cannot switch all of that off.
 private struct PlainTextEditor: NSViewRepresentable {
     @Binding var text: String
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSTextView.scrollableTextView()
+        let scroll = NSScrollView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
-        guard let textView = scroll.documentView as? NSTextView else { return scroll }
+        let textView = MarkdownTextView(frame: .zero)
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                  height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                                       height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = true
+        scroll.documentView = textView
         textView.delegate = context.coordinator
         textView.drawsBackground = false
         textView.font = .systemFont(ofSize: 13)
@@ -336,19 +488,20 @@ private struct PlainTextEditor: NSViewRepresentable {
         textView.smartInsertDeleteEnabled = false
         textView.textContainerInset = NSSize(width: 7, height: 2)
         textView.string = text
+        textView.updateMarkdownAppearance()
         ScratchpadService.shared.registerTextView(textView)
         return scroll
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
-        guard let textView = nsView.documentView as? NSTextView,
-              textView.string != text,
-              !textView.hasMarkedText() else { return }
+        guard let textView = nsView.documentView as? MarkdownTextView else { return }
+        guard textView.string != text, !textView.hasMarkedText() else { return }
         textView.string = text
         // Programmatic replaces (load, retention, restore) invalidate undo
         // entries recorded against the old storage; replaying one would
         // resurrect cleared text or throw a range exception.
         textView.undoManager?.removeAllActions()
+        textView.updateMarkdownAppearance()
     }
 
     func makeCoordinator() -> Coordinator {
@@ -363,7 +516,9 @@ private struct PlainTextEditor: NSViewRepresentable {
         }
 
         func textDidChange(_ notification: Notification) {
-            guard let textView = notification.object as? NSTextView else { return }
+            guard let textView = notification.object as? MarkdownTextView,
+                  !textView.hasMarkedText() else { return }
+            textView.updateMarkdownAppearance()
             text.wrappedValue = textView.string
         }
     }

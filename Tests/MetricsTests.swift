@@ -10289,6 +10289,53 @@ struct MetricsTests {
                 && !safeScratchpadExportName.contains(":"),
                "scratchpad export names cannot turn tab names into path components")
 
+        // Markdown-backed scratchpad notes preserve source text while exposing
+        // only the small subset of syntax that the editor renders interactively.
+        expect(MarkdownSupport.lineKind("# Title") == .heading(level: 1)
+                && MarkdownSupport.lineKind("## Subtitle") == .heading(level: 2)
+                && MarkdownSupport.lineKind("### Detail") == .heading(level: 3)
+                && MarkdownSupport.lineKind("#Title") == .body
+                && MarkdownSupport.lineKind("#### Too deep") == .body,
+               "scratchpad headings require one to three hashes followed by whitespace")
+        expect(MarkdownSupport.lineKind("- [ ] Open") == .task(checked: false)
+                && MarkdownSupport.lineKind("* [x] Done") == .task(checked: true)
+                && MarkdownSupport.lineKind("  - [X] Done") == .task(checked: true)
+                && MarkdownSupport.lineKind("- [  ] Open") == .task(checked: false)
+                && MarkdownSupport.lineKind("- [x]Done") == .body,
+               "scratchpad task lines accept common Markdown checkbox spellings")
+        let markdownText = "# Title\n🙂\n- [ ] Open\n* [X] Done\nplain [ ] text"
+        let markdownRuns = MarkdownSupport.styleRuns(in: markdownText)
+        expect(markdownRuns.contains {
+            $0.kind == .headingMarker(level: 1)
+                && $0.range == NSRange(location: 0, length: 1)
+        } && markdownRuns.contains {
+            $0.kind == .taskMarker(checked: false)
+                && $0.range == (markdownText as NSString).range(of: "[ ]")
+        } && markdownRuns.contains {
+            $0.kind == .taskText(checked: false)
+                && $0.range == (markdownText as NSString).range(of: "Open")
+        },
+               "scratchpad Markdown style ranges use UTF-16 offsets")
+        let uncheckedMarkerIndex = (markdownText as NSString).range(of: "[ ]").location
+        let checkedMarkdown = MarkdownSupport.toggled(in: markdownText, at: uncheckedMarkerIndex + 1)
+        expect(checkedMarkdown == "# Title\n🙂\n- [x] Open\n* [X] Done\nplain [ ] text"
+                && MarkdownSupport.toggled(in: checkedMarkdown ?? "", at: uncheckedMarkerIndex + 1)
+                    == markdownText,
+               "clicking a task marker flips only its source checkbox")
+        let paddedTask = "- [  ] Task"
+        let paddedMarkerIndex = (paddedTask as NSString).range(of: "[  ]").location
+        let checkedPaddedTask = MarkdownSupport.toggled(in: paddedTask, at: paddedMarkerIndex + 1)
+        expect(checkedPaddedTask == "- [x] Task"
+                && MarkdownSupport.toggled(in: checkedPaddedTask ?? "", at: paddedMarkerIndex + 1)
+                    == "- [ ] Task",
+               "toggling a padded checkbox normalizes it without changing surrounding text")
+        expect(MarkdownSupport.markerRange(in: markdownText, at: uncheckedMarkerIndex + 1)
+                    == NSRange(location: uncheckedMarkerIndex, length: 3)
+                && MarkdownSupport.markerRange(in: markdownText,
+                                               at: (markdownText as NSString).range(of: "plain [ ]").location)
+                    == nil,
+               "only the Markdown task marker is interactive")
+
         // Muting every microphone, not just the one the Mac is set to: an app
         // pointed at a device of its own has to go silent too.
         expect(MicMuteSupport.isOwnDevice(name: "Vorssaint Mixer")

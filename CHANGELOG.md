@@ -15,6 +15,8 @@ app lists in Settings and refines feedback, feature setup, Fan Control, Quit on 
 network monitoring, power, peripheral battery readings, panel behavior and keyboard controls.
 
 ### Added
+- Scratchpad notes now style Markdown headings and provide clickable task checkboxes
+  while preserving the original Markdown source.
 - Emoji can open directly from a shortcut assigned to its Command Bar row.
   Thanks to @MaximilianMauroner.
 
