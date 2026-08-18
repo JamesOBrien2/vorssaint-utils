@@ -312,6 +312,20 @@ private struct ScratchpadDragHandle: NSViewRepresentable {
 /// without introducing a second rendered document or changing exported text.
 private final class MarkdownTextView: NSTextView {
     private let baseFont = NSFont.systemFont(ofSize: 13)
+    /// The transient answer currently previewed for a line ending in "=";
+    /// nil when no preview is showing.
+    private var activePreview: String?
+    private var isRepositioningPreview = false
+    private lazy var resultLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.font = .systemFont(ofSize: 13)
+        label.textColor = .secondaryLabelColor
+        label.isSelectable = false
+        label.isHidden = true
+        label.setAccessibilityElement(false)
+        addSubview(label)
+        return label
+    }()
 
     func updateMarkdownAppearance() {
         guard let storage = textStorage else { return }
@@ -353,6 +367,89 @@ private final class MarkdownTextView: NSTextView {
             .font: baseFont,
             .foregroundColor: NSColor.labelColor,
         ]
+        updateComputationPreview()
+    }
+
+    /// Recomputes and repositions the transient answer for the line under the
+    /// caret, or hides it. The answer lives only in this label: the document
+    /// keeps the "… = " the user typed, and Tab is what commits it.
+    func updateComputationPreview() {
+        let source = string as NSString
+        let caret = selectedRange.location
+        guard selectedRange.length == 0, caret <= source.length,
+              let textContainer, let layoutManager else {
+            hideComputationPreview()
+            return
+        }
+        var lineStart = 0
+        var lineEnd = 0
+        var contentsEnd = 0
+        source.getLineStart(&lineStart,
+                            end: &lineEnd,
+                            contentsEnd: &contentsEnd,
+                            for: NSRange(location: caret, length: 0))
+        guard let formatted = ScratchpadMath.result(in: string, upTo: lineStart) else {
+            hideComputationPreview()
+            return
+        }
+        activePreview = formatted
+
+        layoutManager.ensureLayout(for: textContainer)
+        let characterRange = NSRange(location: lineStart, length: contentsEnd - lineStart)
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: characterRange,
+                                                  actualCharacterRange: nil)
+        let lineRect = layoutManager.boundingRect(forGlyphRange: glyphRange,
+                                                  in: textContainer)
+        resultLabel.stringValue = formatted
+        resultLabel.sizeToFit()
+        resultLabel.frame.origin = NSPoint(
+            x: textContainerOrigin.x + lineRect.maxX + 6,
+            y: textContainerOrigin.y + lineRect.minY
+                + (lineRect.height - resultLabel.frame.height) / 2)
+        resultLabel.isHidden = false
+    }
+
+    private func hideComputationPreview() {
+        activePreview = nil
+        resultLabel.isHidden = true
+    }
+
+    /// Tab accepts the preview into the note ("82 + 55 =" becomes
+    /// "82 + 55 = 137"); anywhere else the tab keeps its ordinary meaning.
+    override func insertTab(_ sender: Any?) {
+        guard let preview = activePreview else {
+            super.insertTab(sender)
+            return
+        }
+        let source = string as NSString
+        let caret = selectedRange.location
+        var lineStart = 0
+        var lineEnd = 0
+        var contentsEnd = 0
+        source.getLineStart(&lineStart,
+                            end: &lineEnd,
+                            contentsEnd: &contentsEnd,
+                            for: NSRange(location: caret, length: 0))
+        guard caret == contentsEnd else {
+            super.insertTab(sender)
+            return
+        }
+        insertText(" " + preview, replacementRange: selectedRange)
+    }
+
+    override func layout() {
+        super.layout()
+        guard !resultLabel.isHidden, !isRepositioningPreview else { return }
+        isRepositioningPreview = true
+        updateComputationPreview()
+        isRepositioningPreview = false
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        // The preview is decoration, not a control: clicks there belong to the
+        // editor, which places the caret at the end of the expression line.
+        return hit === resultLabel ? self : hit
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -520,6 +617,11 @@ private struct PlainTextEditor: NSViewRepresentable {
                   !textView.hasMarkedText() else { return }
             textView.updateMarkdownAppearance()
             text.wrappedValue = textView.string
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? MarkdownTextView else { return }
+            textView.updateComputationPreview()
         }
     }
 }

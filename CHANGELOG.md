@@ -17,6 +17,8 @@ network monitoring, power, peripheral battery readings, panel behavior and keybo
 ### Added
 - Scratchpad notes now style Markdown headings and provide clickable task checkboxes
   while preserving the original Markdown source.
+- Scratchpad lines ending in "=" show a transient answer with arithmetic, unit
+  conversions and "name: value" definitions; Tab writes the answer into the note.
 - Emoji can open directly from a shortcut assigned to its Command Bar row.
   Thanks to @MaximilianMauroner.
 

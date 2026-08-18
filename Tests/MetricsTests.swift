@@ -10336,6 +10336,77 @@ struct MetricsTests {
                     == nil,
                "only the Markdown task marker is interactive")
 
+        // A line ending in "=" answers itself in a transient preview: the
+        // command bar's arithmetic and units, plus named values defined by
+        // "name: number" lines above the expression.
+        let mathLocale = Locale(identifier: "en_US")
+        let mathVariables = "guests: 5\n# notes\n- [ ] plan\nrate: 0.5\n"
+        expect(ScratchpadMath.variables(in: mathVariables,
+                                        upTo: (mathVariables as NSString).length)
+                    == ["guests": 5, "rate": 0.5],
+               "scratchpad math collects name: value lines and skips headings and tasks")
+        expect(ScratchpadMath.variables(in: "a: 1\na: 2\n", upTo: 100) == ["a": 2],
+               "a later scratchpad math definition overrides an earlier one")
+        expect(ScratchpadMath.variables(in: "guests : 5\nv1: -2.5\n", upTo: 100)
+                    == ["guests": 5, "v1": -2.5],
+               "scratchpad math definitions allow spacing, signs and fractional values")
+        expectEqual(ScratchpadMath.result(in: "82 + 55 =", upTo: 0, locale: mathLocale) ?? "",
+                    "137", "scratchpad math adds two numbers")
+        expectEqual(ScratchpadMath.result(in: "2 + 3 * 4 =", upTo: 0, locale: mathLocale) ?? "",
+                    "14", "scratchpad math honors operator precedence")
+        expectEqual(ScratchpadMath.result(in: "(2 + 3) * 4 =", upTo: 0, locale: mathLocale) ?? "",
+                    "20", "scratchpad math honors parentheses")
+        expectEqual(ScratchpadMath.result(in: "10 / 4 =", upTo: 0, locale: mathLocale) ?? "",
+                    "2.5", "scratchpad math divides to a decimal")
+        expectEqual(ScratchpadMath.result(in: "0.1 + 0.2 =", upTo: 0, locale: mathLocale) ?? "",
+                    "0.3", "scratchpad math rounds away floating point noise")
+        let guestsDocument = "guests: 5\nguests + 3 ="
+        let guestsLine = (guestsDocument as NSString).range(of: "guests + 3").location
+        expectEqual(ScratchpadMath.result(in: guestsDocument,
+                                          upTo: guestsLine,
+                                          locale: mathLocale) ?? "",
+                    "8", "scratchpad math uses a defined name in an expression")
+        let rateDocument = "rate: 0.5\nrate * 4 ="
+        let rateLine = (rateDocument as NSString).range(of: "rate * 4").location
+        expectEqual(ScratchpadMath.result(in: rateDocument,
+                                          upTo: rateLine,
+                                          locale: mathLocale) ?? "",
+                    "2", "scratchpad math multiplies a fractional definition")
+        let xDocument = "x: 2\nx + 3 ="
+        let xLine = (xDocument as NSString).range(of: "x + 3").location
+        expectEqual(ScratchpadMath.result(in: xDocument,
+                                          upTo: xLine,
+                                          locale: mathLocale) ?? "",
+                    "5", "a scratchpad math name substitutes before the x-means-times rule")
+        expectEqual(ScratchpadMath.result(in: "20 cm to in =", upTo: 0, locale: mathLocale) ?? "",
+                    "7.87 in", "scratchpad math converts centimeters to inches")
+        expectEqual(ScratchpadMath.result(in: "1 in to cm =", upTo: 0, locale: mathLocale) ?? "",
+                    "2.54 cm", "scratchpad math converts inches to centimeters")
+        expectEqual(ScratchpadMath.result(in: "0 c to f =", upTo: 0, locale: mathLocale) ?? "",
+                    "32°F", "scratchpad math converts Celsius to Fahrenheit")
+        expectEqual(ScratchpadMath.result(in: "20 CM to IN =", upTo: 0, locale: mathLocale) ?? "",
+                    "7.87 in", "scratchpad math folds unit case like the command bar")
+        expectEqual(ScratchpadMath.result(in: "20cm to in =", upTo: 0, locale: mathLocale) ?? "",
+                    "7.87 in", "scratchpad math accepts a number glued to its unit")
+        expect(ScratchpadMath.result(in: "20 cm to kg =", upTo: 0, locale: mathLocale) == nil,
+               "scratchpad math refuses units of different families")
+        expect(ScratchpadMath.result(in: "82 + 55 = ", upTo: 0, locale: mathLocale) == "137",
+               "a trailing space after the equals sign still computes")
+        expect(ScratchpadMath.result(in: "2 + 3 = 5", upTo: 0, locale: mathLocale) == nil,
+               "an already answered line is not computed again")
+        expect(ScratchpadMath.result(in: "2 + 3", upTo: 0, locale: mathLocale) == nil,
+               "a line without an equals sign is not computed")
+        expect(ScratchpadMath.result(in: "5 =", upTo: 0, locale: mathLocale) == nil,
+               "a lonely number is not an answer")
+        expect(ScratchpadMath.result(in: "82 + =", upTo: 0, locale: mathLocale) == nil,
+               "an incomplete expression is not computed")
+        expect(ScratchpadMath.result(in: "10 / 0 =", upTo: 0, locale: mathLocale) == nil,
+               "division by zero shows no answer")
+        expect(ScratchpadMath.result(in: "mystery + 3 =", upTo: 0, locale: mathLocale) == nil,
+               "an undefined name shows no answer")
+        expect(ScratchpadMath.result(in: "a + 1 =\na: 5", upTo: 0, locale: mathLocale) == nil,
+               "a definition below the expression does not apply to it")
+
         // Muting every microphone, not just the one the Mac is set to: an app
         // pointed at a device of its own has to go silent too.
         expect(MicMuteSupport.isOwnDevice(name: "Vorssaint Mixer")
