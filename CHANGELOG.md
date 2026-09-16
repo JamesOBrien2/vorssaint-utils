@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- The color picker can add a palette icon to the menu bar that opens the macOS color panel, with its color wheel and your own color palettes.
+
+## [Unreleased]
+
 ### Summary
 More reliable screenshots, audio and Dynamic Island, plus Stage Manager spacing, middle-button desktop gestures and improvements to clipboard history, Command Bar and monitoring.
 
