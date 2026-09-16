@@ -12,6 +12,8 @@ enum MarkdownLineKind: Equatable {
 enum MarkdownStyleKind: Equatable {
     case headingMarker(level: Int)
     case headingText(level: Int)
+    /// The leading "- " (or "* ") of a task line, hidden so only the box shows.
+    case taskBullet
     case taskMarker(checked: Bool)
     case taskText(checked: Bool)
 }
@@ -63,6 +65,12 @@ enum MarkdownSupport {
                         kind: .headingText(level: heading.level)))
                 }
             } else if let task = taskParts(in: line) {
+                if task.bulletLength > 0 {
+                    runs.append(MarkdownStyleRun(
+                        range: NSRange(location: lineStart + task.bulletStart,
+                                       length: task.bulletLength),
+                        kind: .taskBullet))
+                }
                 runs.append(MarkdownStyleRun(
                     range: NSRange(location: lineStart + task.markerStart,
                                    length: task.markerLength),
@@ -113,6 +121,79 @@ enum MarkdownSupport {
         return mutable as String
     }
 
+    /// One indentation step for list lines: a tab, matching the key pressed.
+    static let listIndent = "\t"
+    /// Outdenting also removes up to this many leading spaces, for lists
+    /// indented by hand or pasted from elsewhere.
+    static let listOutdentSpaces = 4
+
+    struct ListIndentEdit: Equatable {
+        let range: NSRange
+        let replacement: String
+        /// The caret after the edit, kept on the same character it was on.
+        let caret: Int
+    }
+
+    /// Tab and Shift-Tab on a bullet or task line move the whole line, marker
+    /// included, when the caret sits in its indentation or marker ("- ",
+    /// "* ", "+ ", "- [ ] "). Returns nil anywhere else, so Tab keeps its
+    /// ordinary meaning inside the item's text.
+    static func listIndentEdit(in text: String, caret: Int, outdent: Bool) -> ListIndentEdit? {
+        let source = text as NSString
+        guard caret >= 0, caret <= source.length else { return nil }
+        var lineStart = 0
+        var lineEnd = 0
+        var contentsEnd = 0
+        source.getLineStart(&lineStart,
+                            end: &lineEnd,
+                            contentsEnd: &contentsEnd,
+                            for: NSRange(location: caret, length: 0))
+        let line = source.substring(with: NSRange(location: lineStart, length: contentsEnd - lineStart))
+        guard let prefixLength = listPrefixLength(in: line),
+              caret - lineStart <= prefixLength else { return nil }
+
+        if !outdent {
+            return ListIndentEdit(range: NSRange(location: lineStart, length: 0),
+                                  replacement: listIndent,
+                                  caret: caret + (listIndent as NSString).length)
+        }
+
+        let lineSource = line as NSString
+        var removed = 0
+        if lineSource.length > 0, lineSource.character(at: 0) == 9 {
+            removed = 1
+        } else {
+            while removed < min(listOutdentSpaces, lineSource.length),
+                  lineSource.character(at: removed) == 32 {
+                removed += 1
+            }
+        }
+        guard removed > 0 else { return nil }
+        return ListIndentEdit(range: NSRange(location: lineStart, length: removed),
+                              replacement: "",
+                              caret: max(lineStart, caret - removed))
+    }
+
+    /// The UTF-16 length of a list line's indentation and marker, through the
+    /// spacing after it, or nil when the line is not a bullet or task.
+    static func listPrefixLength(in line: String) -> Int? {
+        if let task = taskParts(in: line) { return task.textStart }
+        let source = line as NSString
+        var bulletStart = 0
+        while bulletStart < source.length, isMarkdownWhitespace(source.character(at: bulletStart)) {
+            bulletStart += 1
+        }
+        guard bulletStart + 1 < source.length else { return nil }
+        let bullet = source.character(at: bulletStart)
+        guard bullet == 45 || bullet == 42 || bullet == 43,
+              isMarkdownWhitespace(source.character(at: bulletStart + 1)) else { return nil }
+        var contentStart = bulletStart + 2
+        while contentStart < source.length, isMarkdownWhitespace(source.character(at: contentStart)) {
+            contentStart += 1
+        }
+        return contentStart
+    }
+
     private struct HeadingParts {
         let level: Int
         let markerLength: Int
@@ -122,6 +203,8 @@ enum MarkdownSupport {
 
     private struct TaskParts {
         let checked: Bool
+        let bulletStart: Int
+        let bulletLength: Int
         let markerStart: Int
         let markerLength: Int
         let textStart: Int
@@ -185,6 +268,8 @@ enum MarkdownSupport {
             textStart += 1
         }
         return TaskParts(checked: checked,
+                         bulletStart: bulletStart,
+                         bulletLength: 2,
                          markerStart: markerStart,
                          markerLength: closingBracket - markerStart + 1,
                          textStart: textStart,

@@ -88,12 +88,110 @@ enum ScratchpadMath {
 
     // MARK: - Definitions
 
+    /// The range of the name in a "name: number" definition line, if any. The
+    /// scratchpad tints these so defined values read as variables.
+    static func definitionRanges(in document: String) -> [(name: NSRange, value: NSRange)] {
+        let source = document as NSString
+        var ranges: [(name: NSRange, value: NSRange)] = []
+        var scan = 0
+        while scan < source.length {
+            var lineEnd = 0
+            var contentsEnd = 0
+            source.getLineStart(nil,
+                                end: &lineEnd,
+                                contentsEnd: &contentsEnd,
+                                for: NSRange(location: scan, length: 0))
+            let lineRange = NSRange(location: scan, length: contentsEnd - scan)
+            let line = source.substring(with: lineRange)
+            if let parts = definitionParts(in: line) {
+                ranges.append((
+                    name: NSRange(location: scan + parts.nameRange.location,
+                                  length: parts.nameRange.length),
+                    value: NSRange(location: scan + parts.valueRange.location,
+                                   length: parts.valueRange.length)
+                ))
+            }
+            if lineEnd <= scan { break }
+            scan = lineEnd
+        }
+        return ranges
+    }
+
+    /// The ranges of variable names used inside "… =" expression lines, for
+    /// the editor to tint them like their definitions. Only names defined
+    /// above the expression count, matching the substitution rule.
+    static func variableUseRanges(in document: String) -> [NSRange] {
+        let source = document as NSString
+        var ranges: [NSRange] = []
+        var scan = 0
+        while scan < source.length {
+            var lineEnd = 0
+            var contentsEnd = 0
+            source.getLineStart(nil,
+                                end: &lineEnd,
+                                contentsEnd: &contentsEnd,
+                                for: NSRange(location: scan, length: 0))
+            let lineRange = NSRange(location: scan, length: contentsEnd - scan)
+            let line = source.substring(with: lineRange)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.last == "=", trimmed.count > 1 {
+                let environment = variables(in: document, upTo: scan)
+                if !environment.isEmpty {
+                    ranges.append(contentsOf:
+                        identifierRanges(matching: environment, in: line, lineStart: scan))
+                }
+            }
+            if lineEnd <= scan { break }
+            scan = lineEnd
+        }
+        return ranges
+    }
+
+    /// The ranges of whole identifiers in `line` that name a variable in
+    /// `environment`, offset into the document by `lineStart`. A token that
+    /// merely starts with a variable name does not count, exactly like the
+    /// substitution used for the answer preview.
+    private static func identifierRanges(matching environment: [String: Double],
+                                         in line: String,
+                                         lineStart: Int) -> [NSRange] {
+        let characters = Array(line)
+        var ranges: [NSRange] = []
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+            if character.isLetter || character == "_" {
+                let tokenStart = index
+                var name = ""
+                while index < characters.count,
+                      characters[index].isLetter || characters[index].isNumber
+                        || characters[index] == "_" {
+                    name.append(characters[index])
+                    index += 1
+                }
+                if environment[name] != nil {
+                    ranges.append(NSRange(location: lineStart + tokenStart,
+                                          length: index - tokenStart))
+                }
+            } else {
+                index += 1
+            }
+        }
+        return ranges
+    }
+
     /// Parses one "name : number" line. Whitespace around the colon is
     /// optional, the value may be signed and fractional, and anything else
     /// (headings, tasks, prose) is not a definition.
     private static func definition(in line: String) -> (name: String, value: Double)? {
-        let characters = Array(line.trimmingCharacters(in: .whitespaces))
+        guard let parts = definitionParts(in: line) else { return nil }
+        return (parts.name, parts.value)
+    }
+
+    private static func definitionParts(in line: String) -> DefinitionParts? {
+        let characters = Array(line)
         var index = 0
+        while index < characters.count, characters[index].isWhitespace { index += 1 }
+        let nameStart = index
         guard index < characters.count,
               characters[index].isLetter || characters[index] == "_" else { return nil }
         var name = ""
@@ -110,6 +208,7 @@ enum ScratchpadMath {
         guard index < characters.count else { return nil }
 
         var negative = false
+        let valueStart = index
         if characters[index] == "-" || characters[index] == "+" {
             negative = characters[index] == "-"
             index += 1
@@ -131,7 +230,17 @@ enum ScratchpadMath {
         while index < characters.count, characters[index].isWhitespace { index += 1 }
         guard index == characters.count,
               let value = Double("\(integer).\(fraction)") else { return nil }
-        return (name, negative ? -value : value)
+        return DefinitionParts(name: name,
+                               nameRange: NSRange(location: nameStart, length: name.count),
+                               value: negative ? -value : value,
+                               valueRange: NSRange(location: valueStart, length: index - valueStart))
+    }
+
+    private struct DefinitionParts {
+        let name: String
+        let nameRange: NSRange
+        let value: Double
+        let valueRange: NSRange
     }
 
     // MARK: - Substitution

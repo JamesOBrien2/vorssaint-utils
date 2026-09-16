@@ -10335,6 +10335,81 @@ struct MetricsTests {
                                                at: (markdownText as NSString).range(of: "plain [ ]").location)
                     == nil,
                "only the Markdown task marker is interactive")
+        // Task lines hide their leading bullet in the rendered view: the
+        // style run carries the "- " (or "* ") so the layout manager can
+        // skip those glyphs without touching the document text.
+        let bulletText = "- [ ] Open\n* [X] Done\nplain - [x] text"
+        let bulletRuns = MarkdownSupport.styleRuns(in: bulletText)
+        let bulletOffsets = bulletRuns.compactMap { run -> NSRange? in
+            guard case .taskBullet = run.kind else { return nil }
+            return run.range
+        }
+        expect(bulletOffsets == [NSRange(location: 0, length: 2),
+                                 NSRange(location: 11, length: 2)],
+               "scratchpad task lines expose their leading bullet range")
+        expect(MarkdownSupport.styleRuns(in: "# Title\n- plain bullet\n")
+                    .contains { if case .taskBullet = $0.kind { return true } else { return false } } == false,
+               "scratchpad plain bullets and headings carry no task bullet run")
+        // Tab in a bullet or task line's marker indents the whole line and
+        // Shift-Tab outdents it; inside the item's text, or on other lines,
+        // Tab keeps its ordinary meaning.
+        expect(MarkdownSupport.listPrefixLength(in: "- item") == 2
+                && MarkdownSupport.listPrefixLength(in: "\t* item") == 3
+                && MarkdownSupport.listPrefixLength(in: "+ ") == 2
+                && MarkdownSupport.listPrefixLength(in: "  - [ ] task") == 8
+                && MarkdownSupport.listPrefixLength(in: "-item") == nil
+                && MarkdownSupport.listPrefixLength(in: "# Title") == nil
+                && MarkdownSupport.listPrefixLength(in: "plain") == nil,
+               "scratchpad list prefixes cover indentation, bullet and task marker")
+        let listDocument = "notes\n- [ ] task\n- "
+        expect(MarkdownSupport.listIndentEdit(in: listDocument, caret: 12, outdent: false)
+                    == MarkdownSupport.ListIndentEdit(range: NSRange(location: 6, length: 0),
+                                                      replacement: "\t", caret: 13),
+               "scratchpad Tab after a task marker indents the task line")
+        expect(MarkdownSupport.listIndentEdit(in: listDocument, caret: 19, outdent: false)?.range
+                    == NSRange(location: 17, length: 0),
+               "scratchpad Tab on a fresh empty bullet indents it")
+        expect(MarkdownSupport.listIndentEdit(in: listDocument, caret: 14, outdent: false) == nil
+                && MarkdownSupport.listIndentEdit(in: listDocument, caret: 2, outdent: false) == nil,
+               "scratchpad Tab inside item text or on a plain line is not a list indent")
+        expect(MarkdownSupport.listIndentEdit(in: "\t- item", caret: 3, outdent: true)
+                    == MarkdownSupport.ListIndentEdit(range: NSRange(location: 0, length: 1),
+                                                      replacement: "", caret: 2)
+                && MarkdownSupport.listIndentEdit(in: "      - item", caret: 1, outdent: true)
+                    == MarkdownSupport.ListIndentEdit(range: NSRange(location: 0, length: 4),
+                                                      replacement: "", caret: 0),
+               "scratchpad Shift-Tab removes one tab or up to four spaces")
+        expect(MarkdownSupport.listIndentEdit(in: "- item", caret: 0, outdent: true) == nil,
+               "scratchpad Shift-Tab on an unindented list line does nothing")
+        expect(MarkdownSupport.lineKind("\t\t- [x] nested") == .task(checked: true),
+               "scratchpad indented task lines still draw their checkbox")
+        // Variable definitions expose their name and value ranges so the
+        // editor can tint the name; headings, tasks and prose never match.
+        let definitionDocument = "guests: 5\n# notes\n- [ ] plan\n  rate : -2.5\n"
+        let definitionRanges = ScratchpadMath.definitionRanges(in: definitionDocument)
+        expect(definitionRanges.count == 2
+                && definitionRanges[0].name == NSRange(location: 0, length: 6)
+                && definitionRanges[0].value == NSRange(location: 8, length: 1)
+                && definitionRanges[1].name == NSRange(location: 31, length: 4)
+                && definitionRanges[1].value == NSRange(location: 38, length: 4),
+               "scratchpad definition ranges locate names and values in the document")
+        // Variable uses inside "… =" expressions expose their ranges so the
+        // editor can tint them like the definitions; only names defined
+        // above the expression count, and only whole identifiers match.
+        let useDocument = "guests: 5\nrate: 0.5\nguests + rate * 2 =\n"
+        expect(ScratchpadMath.variableUseRanges(in: useDocument)
+                    == [NSRange(location: 20, length: 6),
+                        NSRange(location: 29, length: 4)],
+               "scratchpad expression variable uses are located in the document")
+        expect(ScratchpadMath.variableUseRanges(in: "mystery + 1 =\n").isEmpty,
+               "scratchpad expressions with unknown names expose no uses")
+        expect(ScratchpadMath.variableUseRanges(in: "x: 2\nx + 3 =\n")
+                    == [NSRange(location: 5, length: 1)],
+               "scratchpad definition lines are not themselves expression uses")
+        expect(ScratchpadMath.variableUseRanges(in: "x + 1 =\nx: 5\n").isEmpty,
+               "a scratchpad definition below the expression does not tint it")
+        expect(ScratchpadMath.variableUseRanges(in: "x: 2\nx2 + 1 =\n").isEmpty,
+               "a scratchpad token that only starts with a variable name is not a use")
 
         // A line ending in "=" answers itself in a transient preview: the
         // command bar's arithmetic and units, plus named values defined by

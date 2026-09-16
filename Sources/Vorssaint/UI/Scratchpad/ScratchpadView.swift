@@ -338,21 +338,24 @@ private final class MarkdownTextView: NSTextView {
             ], range: fullRange)
         }
 
-        for run in MarkdownSupport.styleRuns(in: string) {
+        let runs = MarkdownSupport.styleRuns(in: string)
+        for run in runs {
             switch run.kind {
             case .headingMarker(let level):
                 storage.addAttributes(headingAttributes(level: level), range: run.range)
             case .headingText(let level):
                 storage.addAttributes(headingAttributes(level: level), range: run.range)
-            case .taskMarker(let checked):
-                // Keep the three source characters in the document, but draw
-                // one native-looking checkbox in place of their visible glyphs.
-                storage.addAttribute(.foregroundColor, value: NSColor.clear, range: run.range)
-                let attachment = NSTextAttachment()
-                attachment.image = Self.checkboxImage(checked: checked)
-                storage.addAttribute(.attachment,
-                                      value: attachment,
-                                      range: NSRange(location: run.range.location, length: 1))
+            case .taskMarker:
+                // The box is drawn by the CheckboxLayoutManager over the
+                // marker's glyph rect; the storage keeps the source "[ ]"
+                // / "[x]" characters untouched so selection and copy still
+                // yield plain Markdown.
+                break
+            case .taskBullet:
+                // The leading "- " of a task line is hidden by the layout
+                // manager so only the box shows, matching the scratchpad's
+                // task look. The characters themselves stay in the document.
+                break
             case .taskText(let checked):
                 if checked {
                     storage.addAttributes([
@@ -361,6 +364,23 @@ private final class MarkdownTextView: NSTextView {
                     ], range: run.range)
                 }
             }
+        }
+        if let layoutManager = layoutManager as? CheckboxLayoutManager {
+            layoutManager.taskRuns = runs
+            layoutManager.invalidateDisplay(forCharacterRange: fullRange)
+        }
+        // Variable definitions and uses share one tint so defined names read
+        // as variables wherever they appear: the name in a "name: number"
+        // line and each use inside a "… =" expression.
+        for definition in ScratchpadMath.definitionRanges(in: string) {
+            storage.addAttribute(.foregroundColor,
+                                 value: NSColor.controlAccentColor,
+                                 range: definition.name)
+        }
+        for use in ScratchpadMath.variableUseRanges(in: string) {
+            storage.addAttribute(.foregroundColor,
+                                 value: NSColor.controlAccentColor,
+                                 range: use)
         }
         storage.endEditing()
         typingAttributes = [
@@ -414,9 +434,12 @@ private final class MarkdownTextView: NSTextView {
         resultLabel.isHidden = true
     }
 
-    /// Tab accepts the preview into the note ("82 + 55 =" becomes
-    /// "82 + 55 = 137"); anywhere else the tab keeps its ordinary meaning.
+    /// Tab in a bullet or task line's marker indents the whole line; Tab at
+    /// the end of a line ending in "=" accepts the preview into the note
+    /// ("82 + 55 =" becomes "82 + 55 = 137"); anywhere else the tab keeps its
+    /// ordinary meaning.
     override func insertTab(_ sender: Any?) {
+        if applyListIndent(outdent: false) { return }
         guard let preview = activePreview else {
             super.insertTab(sender)
             return
@@ -435,6 +458,117 @@ private final class MarkdownTextView: NSTextView {
             return
         }
         insertText(" " + preview, replacementRange: selectedRange)
+    }
+
+    /// Shift-Tab in a bullet or task line's marker outdents the whole line.
+    override func insertBacktab(_ sender: Any?) {
+        if applyListIndent(outdent: true) { return }
+        super.insertBacktab(sender)
+    }
+
+    /// Moves the list line under the caret one step in or out, through the
+    /// undoable change path, keeping the caret on the same character.
+    private func applyListIndent(outdent: Bool) -> Bool {
+        guard selectedRange.length == 0, !hasMarkedText(),
+              let edit = MarkdownSupport.listIndentEdit(in: string,
+                                                        caret: selectedRange.location,
+                                                        outdent: outdent),
+              shouldChangeText(in: edit.range, replacementString: edit.replacement) else {
+            return false
+        }
+        replaceCharacters(in: edit.range, with: edit.replacement)
+        setSelectedRange(NSRange(location: edit.caret, length: 0))
+        didChangeText()
+        updateMarkdownAppearance()
+        return true
+    }
+
+    // MARK: - Variable autocomplete
+
+    private var completionWorkItem: DispatchWorkItem?
+    /// Right after a completion is accepted the caret sits at the end of the
+    /// finished name; do not immediately offer the same name again.
+    private var suppressCompletionUntil = Date.distantPast
+
+    override func didChangeText() {
+        super.didChangeText()
+        scheduleVariableCompletion()
+    }
+
+    private func scheduleVariableCompletion() {
+        completionWorkItem?.cancel()
+        guard Date() >= suppressCompletionUntil else { return }
+        let item = DispatchWorkItem { [weak self] in
+            self?.showVariableCompletionIfNeeded()
+        }
+        completionWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: item)
+    }
+
+    private func showVariableCompletionIfNeeded() {
+        guard isEditable, window?.isKeyWindow == true, selectedRange.length == 0 else { return }
+        let partial = rangeForUserCompletion()
+        guard partial.location != NSNotFound, partial.length >= 3,
+              NSMaxRange(partial) <= (string as NSString).length else { return }
+        let source = string as NSString
+        let prefix = source.substring(with: partial)
+        guard !variableNames(upTo: partial.location)
+            .filter({ $0.lowercased().hasPrefix(prefix.lowercased()) }).isEmpty else { return }
+        complete(nil)
+    }
+
+    func rangeForUserCompletion() -> NSRange {
+        let source = string as NSString
+        let caret = min(selectedRange.location, source.length)
+        var start = caret
+        while start > 0, isVariableNameCharacter(source.character(at: start - 1)) {
+            start -= 1
+        }
+        guard caret > start else { return NSRange(location: NSNotFound, length: 0) }
+        return NSRange(location: start, length: caret - start)
+    }
+
+    override func completions(forPartialWordRange charRange: NSRange,
+                              indexOfSelectedItem index: UnsafeMutablePointer<Int>?) -> [String]? {
+        let source = string as NSString
+        guard charRange.location != NSNotFound, charRange.length >= 3,
+              NSMaxRange(charRange) <= source.length else { return nil }
+        let partial = source.substring(with: charRange)
+        let matches = variableNames(upTo: charRange.location)
+            .filter { $0.lowercased().hasPrefix(partial.lowercased()) }
+        guard !matches.isEmpty else { return nil }
+        index?.pointee = 0
+        return matches
+    }
+
+    override func insertCompletion(_ word: String,
+                                   forPartialWordRange charRange: NSRange,
+                                   movement: Int,
+                                   isFinal flag: Bool) {
+        super.insertCompletion(word, forPartialWordRange: charRange, movement: movement, isFinal: flag)
+        // Accepting a completion types the whole name; do not immediately
+        // offer the same name again on the next keystroke.
+        suppressCompletionUntil = Date().addingTimeInterval(0.6)
+    }
+
+    /// The defined variable names above the caret's line, sorted. A name
+    /// being typed on the current line is not yet a candidate.
+    private func variableNames(upTo location: Int) -> [String] {
+        var lineStart = 0
+        var lineEnd = 0
+        var contentsEnd = 0
+        (string as NSString).getLineStart(&lineStart,
+                                          end: &lineEnd,
+                                          contentsEnd: &contentsEnd,
+                                          for: NSRange(location: location, length: 0))
+        return ScratchpadMath.variables(in: string, upTo: lineStart).keys.sorted()
+    }
+
+    private func isVariableNameCharacter(_ character: unichar) -> Bool {
+        if character == 95 { return true } // underscore
+        guard let scalar = UnicodeScalar(UInt32(character)) else { return false }
+        let value = Character(scalar)
+        return value.isLetter || value.isNumber
     }
 
     override func layout() {
@@ -518,8 +652,81 @@ private final class MarkdownTextView: NSTextView {
             .foregroundColor: color,
         ]
     }
+}
 
-    private static func checkboxImage(checked: Bool) -> NSImage {
+/// Draws the scratchpad's task checkboxes and hides the leading bullet of a
+/// task line without touching the text storage: the document keeps the exact
+/// "- [ ] text" the user typed, and only the rendered glyphs change. Drawing
+/// at layout time (instead of hiding characters or inserting attachments)
+/// survives every edit in a plain-text view, where attribute tricks and
+/// attachments are stripped after typing.
+private final class CheckboxLayoutManager: NSLayoutManager {
+    /// The style runs of the current document; the marker and bullet runs
+    /// decide what this layout manager hides and where it draws the boxes.
+    var taskRuns: [MarkdownStyleRun] = []
+
+    override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        var markers: [(range: NSRange, checked: Bool)] = []
+        var bullets: [NSRange] = []
+        for run in taskRuns {
+            switch run.kind {
+            case .taskMarker(let checked):
+                markers.append((run.range, checked))
+            case .taskBullet:
+                bullets.append(run.range)
+            default:
+                break
+            }
+        }
+        guard !markers.isEmpty || !bullets.isEmpty else {
+            super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
+            return
+        }
+
+        // The glyphs of the bullet and of the marker's source characters are
+        // skipped, then one checkbox image is drawn centered on the marker's
+        // glyph rect.
+        var skipped: [NSRange] = []
+        for bullet in bullets {
+            skipped.append(glyphRange(forCharacterRange: bullet, actualCharacterRange: nil))
+        }
+        for marker in markers {
+            skipped.append(glyphRange(forCharacterRange: marker.range, actualCharacterRange: nil))
+        }
+        skipped.sort { $0.location < $1.location }
+
+        var cursor = glyphsToShow.location
+        let end = NSMaxRange(glyphsToShow)
+        for skip in skipped {
+            let clamped = NSIntersectionRange(skip, glyphsToShow)
+            guard clamped.length > 0 else { continue }
+            if cursor < clamped.location {
+                super.drawGlyphs(forGlyphRange: NSRange(location: cursor,
+                                                        length: clamped.location - cursor),
+                                 at: origin)
+            }
+            cursor = NSMaxRange(clamped)
+        }
+        if cursor < end {
+            super.drawGlyphs(forGlyphRange: NSRange(location: cursor, length: end - cursor), at: origin)
+        }
+
+        guard let container = textContainers.first else { return }
+        for (range, checked) in markers {
+            let glyphRange = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            let clamped = NSIntersectionRange(glyphRange, glyphsToShow)
+            guard clamped.length > 0 else { continue }
+            let rect = boundingRect(forGlyphRange: clamped, in: container)
+            let box = NSRect(x: rect.midX - 6.5 + origin.x,
+                             y: rect.midY - 6.5 + origin.y,
+                             width: 13, height: 13)
+            Self.checkboxImage(checked: checked).draw(in: box)
+        }
+    }
+
+    /// A native-looking checkbox: an empty rounded square for unchecked, a
+    /// filled accent square with a white check for checked.
+    static func checkboxImage(checked: Bool) -> NSImage {
         let size = NSSize(width: 13, height: 13)
         let image = NSImage(size: size)
         image.lockFocus()
@@ -558,6 +765,10 @@ private struct PlainTextEditor: NSViewRepresentable {
         scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
         let textView = MarkdownTextView(frame: .zero)
+        // The checkbox drawing lives in the layout manager: it can hide the
+        // marker's glyphs and paint the box without touching the text storage,
+        // which keeps the document plain text no matter how it is edited.
+        textView.textContainer?.replaceLayoutManager(CheckboxLayoutManager())
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
                                   height: CGFloat.greatestFiniteMagnitude)
