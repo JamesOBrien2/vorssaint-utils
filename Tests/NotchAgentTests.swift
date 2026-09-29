@@ -1068,6 +1068,15 @@ enum NotchAgentTests {
                         == NotchAgentSupport.cardHeight + NotchAgentSupport.spacing + NotchAgentSupport.chartHeight
                         && NotchAgentSupport.contentHeight([]) == 0,
                      "the page is as tall as its rows")
+        let expanded = NotchAgentSupport.liveExpansionFrame(
+            card: CGRect(x: 230, y: 110, width: 200, height: 96),
+            page: CGSize(width: 450, height: 260), sessions: 8)
+        let narrow = NotchAgentSupport.liveExpansionFrame(
+            card: CGRect(x: 12, y: 30, width: 216, height: 96),
+            page: CGSize(width: 240, height: 150), sessions: 20)
+        suite.expect(expanded == CGRect(x: 82, y: 8, width: 360, height: 244)
+                        && narrow == CGRect(x: 8, y: 8, width: 224, height: 134),
+                     "the live card grows over its neighbours but stays within narrow and short pages")
         let geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1512, height: 982), safeAreaTop: 32,
                                      cameraWidth: 185, layout: .spacious, compactSideRoom: 200)
         suite.expect(geometry.expandedSize(module: .agents, agentsHeight: 96).height

@@ -220,6 +220,15 @@ enum NotchAgentSupport {
         guard !rows.isEmpty else { return 0 }
         return rows.map(height).reduce(0, +) + spacing * CGFloat(rows.count - 1)
     }
+
+    static func liveExpansionFrame(card: CGRect, page: CGSize, sessions: Int) -> CGRect {
+        let margin = min(8, max(0, min(page.width, page.height) / 2))
+        let width = min(max(0, page.width - margin * 2), max(card.width, 360))
+        let height = min(max(0, page.height - margin * 2), max(card.height, 44 + CGFloat(sessions) * 29))
+        let x = min(max(margin, card.midX - width / 2), max(margin, page.width - margin - width))
+        let y = min(max(margin, card.midY - height / 2), max(margin, page.height - margin - height))
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
 }
 
 /// Numbers in the reader's region; costs in US dollars, the currency both

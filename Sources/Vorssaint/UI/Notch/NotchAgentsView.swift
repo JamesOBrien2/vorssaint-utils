@@ -8,6 +8,9 @@ struct NotchAgentsView: View {
     let size: CGSize
     @ObservedObject private var usage = AgentUsageService.shared
     @ObservedObject private var l10n = L10n.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var liveExpanded = false
+    @FocusState private var liveOverlayFocused: Bool
     @AppStorage(DefaultsKey.notchAgentsPeriod) private var period = AgentPeriod.today.rawValue
     @AppStorage(DefaultsKey.notchAgentsLimitDisplay) private var display = NotchAgentLimitDisplay.remaining.rawValue
     @AppStorage(DefaultsKey.notchAgentsCardOrder) private var cardOrder = ""
@@ -29,6 +32,11 @@ struct NotchAgentsView: View {
         _ = (cardOrder, hiddenCards)
         return NotchAgentSupport.rows(NotchAgentSupport.tiles(cards: NotchAgentSupport.cards(), providers: providers),
                                       width: size.width)
+    }
+
+    private var canExpandLive: Bool {
+        rows.flatMap { $0 }.contains { $0.card == .live }
+            && usage.snapshot.live.filter { providers.contains($0.provider) }.count > 2
     }
 
     var body: some View {
@@ -56,8 +64,43 @@ struct NotchAgentsView: View {
             }
         }
         .frame(width: size.width, height: size.height, alignment: .top)
+        .overlayPreferenceValue(NotchAgentLiveAnchorKey.self) { anchor in
+            GeometryReader { geometry in
+                if liveExpanded, canExpandLive, let anchor {
+                    let frame = NotchAgentSupport.liveExpansionFrame(
+                        card: geometry[anchor], page: size,
+                        sessions: usage.snapshot.live.filter { providers.contains($0.provider) }.count)
+                    ZStack(alignment: .topLeading) {
+                        Color.black.opacity(0.42)
+                            .contentShape(Rectangle())
+                            .onTapGesture(perform: toggleLive)
+                        NotchAgentLiveCard(snapshot: usage.snapshot, providers: providers, text: text,
+                                           expanded: true, onToggle: toggleLive)
+                            .frame(width: frame.width, height: frame.height)
+                            .background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 18))
+                            .shadow(color: .black.opacity(0.65), radius: 24, y: 12)
+                            .position(x: frame.midX, y: frame.midY)
+                    }
+                    .frame(width: size.width, height: size.height)
+                    .focusable()
+                    .focused($liveOverlayFocused)
+                    .onExitCommand(perform: toggleLive)
+                    .onAppear { liveOverlayFocused = true }
+                    .transition(reduceMotion ? .opacity : .scale(scale: 0.86).combined(with: .opacity))
+                }
+            }
+        }
         .environment(\.locale, l10n.language.formattingLocale())
         .onAppear { usage.pageDidAppear() }
+        .onChange(of: canExpandLive) { _, canExpand in
+            if !canExpand { liveExpanded = false }
+        }
+    }
+
+    private func toggleLive() {
+        withAnimation(reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.36, dampingFraction: 0.82)) {
+            liveExpanded.toggle()
+        }
     }
 
     private func grid(_ rows: [[NotchAgentTile]], now: Date) -> some View {
@@ -84,7 +127,8 @@ struct NotchAgentsView: View {
         case .spend:
             NotchAgentSpendCard(snapshot: snapshot, providers: providers, period: $period, text: text)
         case .live:
-            NotchAgentLiveCard(snapshot: snapshot, providers: providers, text: text)
+            NotchAgentLiveCard(snapshot: snapshot, providers: providers, text: text, onToggle: toggleLive)
+                .anchorPreference(key: NotchAgentLiveAnchorKey.self, value: .bounds) { $0 }
         case .trend:
             NotchAgentTrendCard(snapshot: snapshot, providers: providers, period: shown, text: text)
         case .models:
@@ -98,6 +142,13 @@ struct NotchAgentsView: View {
         case .resets:
             NotchAgentResetsCard(now: now, text: text)
         }
+    }
+}
+
+private struct NotchAgentLiveAnchorKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
     }
 }
 
@@ -419,6 +470,9 @@ private struct NotchAgentLiveCard: View {
     let snapshot: AgentUsageSnapshot
     let providers: [AgentProvider]
     let text: NotchAgentStrings
+    var expanded = false
+    let onToggle: () -> Void
+    @ObservedObject private var l10n = L10n.shared
     @Environment(\.locale) private var locale
 
     var body: some View {
@@ -428,8 +482,25 @@ private struct NotchAgentLiveCard: View {
                 NotchAgentCardHeader(title: text.liveCard, symbol: NotchAgentCard.live.symbol,
                                      tint: live.first?.provider.tint ?? .secondary) {
                     HStack(spacing: 4) {
-                        if live.count > 2 { NotchAgentChip(text: "+\(live.count - 2)") }
+                        if !expanded, live.count > 2 {
+                            Button(action: onToggle) {
+                                NotchAgentChip(text: "+\(live.count - 2)")
+                                    .frame(minWidth: 32, minHeight: 24)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("\(text.liveCard), \(l10n.s.menuShowAll), \(live.count)")
+                        }
                         if let first = live.first { NotchAgentPulse(tint: first.provider.tint, size: 5) }
+                        if expanded {
+                            Button(action: onToggle) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .frame(width: 20, height: 20)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(l10n.s.menuClose)
+                        }
                     }
                 }
                 if live.isEmpty {
@@ -438,12 +509,23 @@ private struct NotchAgentLiveCard: View {
                     }
                 } else {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
-                        VStack(alignment: .leading, spacing: 5) {
-                            ForEach(live.prefix(2)) { row($0, now: context.date) }
+                        if expanded {
+                            ScrollView {
+                                liveRows(live, now: context.date)
+                            }
+                            .scrollIndicators(.automatic)
+                        } else {
+                            liveRows(Array(live.prefix(2)), now: context.date)
                         }
                     }
                 }
             }
+        }
+    }
+
+    private func liveRows(_ sessions: [AgentLiveSession], now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(sessions) { row($0, now: now) }
         }
     }
 
