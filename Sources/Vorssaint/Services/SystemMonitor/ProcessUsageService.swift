@@ -13,6 +13,8 @@ struct ProcessUsage: Identifiable, Equatable {
     let value: Double
     let networkDownBytesPerSec: Double?
     let networkUpBytesPerSec: Double?
+    /// Kernel start time of the responsible process; a PID can be reused while this row is cached.
+    let startedAt: UInt64?
 
     var id: pid_t { pid }
 
@@ -20,12 +22,14 @@ struct ProcessUsage: Identifiable, Equatable {
          name: String,
          value: Double,
          networkDownBytesPerSec: Double? = nil,
-         networkUpBytesPerSec: Double? = nil) {
+         networkUpBytesPerSec: Double? = nil,
+         startedAt: UInt64? = nil) {
         self.pid = pid
         self.name = name
         self.value = value
         self.networkDownBytesPerSec = networkDownBytesPerSec
         self.networkUpBytesPerSec = networkUpBytesPerSec
+        self.startedAt = startedAt
     }
 }
 
@@ -160,38 +164,43 @@ final class ProcessUsageService {
         return true
     }
 
-    /// The CPU/GPU delta path names unresolved rows "pid N", so protection has
-    /// to be judged on the real executable name too, not the display name alone.
-    /// A name that will not resolve belongs to root or another user, which we
-    /// could not kill anyway, so refuse instead of trusting the display name.
+    /// CPU/GPU rows may be named "pid N"; check the executable as well as the
+    /// cached process identity before offering a destructive action.
     func canForceQuit(_ row: ProcessUsage) -> Bool {
-        guard let executable = Self.executableName(row.pid) else { return false }
+        guard AppFeature.killProcess.isAvailable,
+              let startedAt = row.startedAt,
+              KillProcessService.startTime(for: row.pid) == startedAt,
+              let executable = Self.executableName(row.pid) else { return false }
         return !KillProcessSupport.isProtected(pid: row.pid, name: executable)
             && !KillProcessSupport.isProtected(pid: row.pid, name: row.name)
     }
 
-    /// Confirms first, the way the Command Bar's force kill does, so a stray
-    /// Backspace in the panel cannot take an app down silently.
-    func confirmForceQuit(_ row: ProcessUsage) {
-        guard canForceQuit(row) else { return }
+    func confirmForceQuit(_ row: ProcessUsage, inNotch: Bool) {
+        guard canForceQuit(row), let startedAt = row.startedAt else { return }
         let strings = FeatureStrings.killProcess(L10n.shared.language)
+        let title = String(format: strings.confirmForceKillFormat, row.name)
+        let cancel = L10n.shared.s.uninstallerCancel
+        if inNotch {
+            DispatchQueue.main.async { [weak self] in
+                guard NSAlert.confirmAboveIsland(title, message: "", action: strings.forceKillButton,
+                                                 destructive: true, cancel: cancel) else { return }
+                self?.forceQuit(row, startedAt: startedAt)
+            }
+            return
+        }
         let alert = NSAlert()
         alert.alertStyle = .critical
-        alert.messageText = String(format: strings.confirmForceKillFormat, row.name)
+        alert.messageText = title
         alert.addButton(withTitle: strings.forceKillButton)
-        alert.addButton(withTitle: L10n.shared.s.uninstallerCancel)
+        alert.addButton(withTitle: cancel)
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        forceQuit(row)
+        forceQuit(row, startedAt: startedAt)
     }
 
-    private func forceQuit(_ row: ProcessUsage) {
+    private func forceQuit(_ row: ProcessUsage, startedAt: UInt64) {
         guard canForceQuit(row) else { return }
-        if let app = NSRunningApplication(processIdentifier: row.pid), !app.isTerminated {
-            app.forceTerminate()
-        } else {
-            _ = Darwin.kill(row.pid, SIGKILL)
-        }
+        KillProcessService.shared.kill(pid: row.pid, name: row.name, startedAt: startedAt, force: true)
     }
 
     private static func executableName(_ pid: pid_t) -> String? {
@@ -241,12 +250,13 @@ final class ProcessUsageService {
         let gpuRows = topGPU(limit: sampleLimit,
                              sampleInterval: sampleInterval,
                              aggregatePercentage: gpuPercentage)
-        var scores: [pid_t: (name: String, value: Double)] = [:]
+        var scores: [pid_t: (name: String, value: Double, startedAt: UInt64?)] = [:]
 
         for row in cpuRows + gpuRows {
-            var score = scores[row.pid] ?? (row.name, 0)
+            var score = scores[row.pid] ?? (row.name, 0, row.startedAt)
             score.value += row.value
             if score.name.hasPrefix("pid ") { score.name = row.name }
+            if score.startedAt != row.startedAt { score.startedAt = nil }
             scores[row.pid] = score
         }
 
@@ -256,7 +266,8 @@ final class ProcessUsageService {
             .map { pid, score in
                 ProcessUsage(pid: pid,
                              name: score.name,
-                             value: MetricFormat.boundedPercentage(score.value))
+                             value: MetricFormat.boundedPercentage(score.value),
+                             startedAt: score.startedAt)
             }
         cacheLock.lock()
         energyCache = cachedRows(from: rows)
@@ -555,7 +566,7 @@ final class ProcessUsageService {
             }
         }
 
-        return totals
+        let grouped = totals
             .sorted { $0.value > $1.value }
             .map { owner, value in
                 ProcessUsage(pid: owner,
@@ -563,6 +574,7 @@ final class ProcessUsageService {
                                                                   fallback: fallbackNames[owner] ?? "pid \(owner)"),
                              value: value)
             }
+        return withForceQuitIdentity(grouped)
     }
 
     private func reconciledUsageRows(_ rows: [ProcessUsage],
@@ -573,7 +585,8 @@ final class ProcessUsageService {
         return rows.map { row in
             ProcessUsage(pid: row.pid,
                          name: row.name,
-                         value: MetricFormat.boundedPercentage(row.value * scale))
+                         value: MetricFormat.boundedPercentage(row.value * scale),
+                         startedAt: row.startedAt)
         }
     }
 
@@ -592,7 +605,7 @@ final class ProcessUsageService {
             }
         }
 
-        return totals
+        let grouped = totals
             .map { owner, value in
                 ProcessUsage(pid: owner,
                              name: ResponsibleProcess.displayName(pid: owner,
@@ -603,6 +616,19 @@ final class ProcessUsageService {
             }
             .filter { $0.value > 0 }
             .sorted { $0.value > $1.value }
+        return withForceQuitIdentity(grouped)
+    }
+
+    /// Identity belongs to the displayed owner PID, not to a grouped helper.
+    private func withForceQuitIdentity(_ rows: [ProcessUsage]) -> [ProcessUsage] {
+        guard AppFeature.killProcess.isAvailable else { return rows }
+        return rows.enumerated().map { index, row in
+            guard index < maximumCachedRows else { return row }
+            return ProcessUsage(pid: row.pid, name: row.name, value: row.value,
+                                networkDownBytesPerSec: row.networkDownBytesPerSec,
+                                networkUpBytesPerSec: row.networkUpBytesPerSec,
+                                startedAt: KillProcessService.startTime(for: row.pid))
+        }
     }
 
     // MARK: - GPU

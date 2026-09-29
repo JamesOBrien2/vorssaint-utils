@@ -4,37 +4,79 @@
 import Darwin
 import Foundation
 
-/// `canForceQuit` is all that stands between Backspace in the panel's process
-/// list and killing WindowServer, so the real guard runs here verbatim. The
-/// CPU/GPU rows can be named "pid N", which is why the guard has to resolve the
-/// executable name itself instead of trusting the display name.
+/// Run the real eligibility guard with controlled process identities; no process is signalled.
 enum ProcessForceQuitTests {
     struct ProcessUsage {
         let pid: pid_t
         let name: String
+        let startedAt: UInt64?
+    }
+
+    enum KillProcessService {
+        static var startTimes: [pid_t: UInt64] = [:]
+        static var lookups = 0
+        static func startTime(for pid: pid_t) -> UInt64? {
+            lookups += 1
+            return startTimes[pid]
+        }
     }
 
     static func run(_ suite: TestSuite) {
-        let service = Service()
-        suite.expect(!service.canForceQuit(ProcessUsage(pid: getpid(), name: "Whatever")),
-                     "the app's own process stays protected")
-        suite.expect(!service.canForceQuit(ProcessUsage(pid: 1, name: "pid 1")),
-                     "launchd stays protected")
-        for name in ["WindowServer", "loginwindow", "kernel_task"] {
-            guard let pid = pid(named: name) else { continue }
-            suite.expect(!service.canForceQuit(ProcessUsage(pid: pid, name: "pid \(pid)")),
-                         "\(name) stays protected behind an unresolved display name")
-            suite.expect(!service.canForceQuit(ProcessUsage(pid: pid, name: name)),
-                         "\(name) stays protected under its own name")
+        let defaults = UserDefaults.standard
+        let featureKey = AppFeature.killProcess.availabilityKey
+        let previous = defaults.object(forKey: featureKey)
+        defer {
+            if let previous { defaults.set(previous, forKey: featureKey) }
+            else { defaults.removeObject(forKey: featureKey) }
+            KillProcessService.startTimes = [:]
+            KillProcessService.lookups = 0
         }
 
         let victim = Process()
         victim.executableURL = URL(fileURLWithPath: "/bin/sleep")
-        victim.arguments = ["30"]
-        try? victim.run()
-        suite.expect(service.canForceQuit(ProcessUsage(pid: victim.processIdentifier, name: "sleep")),
-                     "an ordinary process can be force quit")
-        victim.terminate()
+        victim.arguments = ["60"]
+        guard (try? victim.run()) != nil else {
+            suite.expect(false, "an ordinary test process can launch")
+            return
+        }
+        defer { victim.terminate(); victim.waitUntilExit() }
+        let victimPID = victim.processIdentifier
+        KillProcessService.startTimes[victimPID] = 42
+        let service = Service()
+
+        defaults.set(false, forKey: featureKey)
+        suite.expect(!service.canForceQuit(ProcessUsage(pid: victimPID, name: "sleep", startedAt: 42))
+                     && KillProcessService.lookups == 0,
+                     "uninstalled Kill Process does not inspect or expose a process")
+
+        defaults.set(true, forKey: featureKey)
+        suite.expect(!service.canForceQuit(ProcessUsage(pid: victimPID, name: "sleep", startedAt: nil)),
+                     "a row without a sampled identity cannot be killed")
+        suite.expect(!service.canForceQuit(ProcessUsage(pid: victimPID, name: "sleep", startedAt: 41)),
+                     "a PID reused before menu selection cannot be killed")
+        suite.expect(service.canForceQuit(ProcessUsage(pid: victimPID, name: "sleep", startedAt: 42)),
+                     "an ordinary process with a matching identity can be force killed")
+        KillProcessService.startTimes[victimPID] = 43
+        suite.expect(!service.canForceQuit(ProcessUsage(pid: victimPID, name: "sleep", startedAt: 42)),
+                     "a PID reused while confirmation is open cannot be killed")
+        KillProcessService.startTimes[victimPID] = 42
+        suite.expect(!service.canForceQuit(ProcessUsage(pid: victimPID, name: "WindowServer", startedAt: 42)),
+                     "a protected display name cannot be killed")
+
+        KillProcessService.startTimes[getpid()] = 42
+        suite.expect(!service.canForceQuit(ProcessUsage(pid: getpid(), name: "Whatever", startedAt: 42)),
+                     "the app's own process stays protected")
+        KillProcessService.startTimes[1] = 42
+        suite.expect(!service.canForceQuit(ProcessUsage(pid: 1, name: "pid 1", startedAt: 42)),
+                     "launchd stays protected")
+        for name in ["WindowServer", "loginwindow", "kernel_task"] {
+            guard let pid = pid(named: name) else { continue }
+            KillProcessService.startTimes[pid] = 42
+            suite.expect(!service.canForceQuit(ProcessUsage(pid: pid, name: "pid \(pid)", startedAt: 42)),
+                         "\(name) stays protected behind an unresolved display name")
+            suite.expect(!service.canForceQuit(ProcessUsage(pid: pid, name: name, startedAt: 42)),
+                         "\(name) stays protected under its own name")
+        }
     }
 
     /// `ps` rather than `proc_name`, which returns nothing for processes owned
