@@ -123,6 +123,7 @@ struct NotchDownloadsView: View {
         .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .clipped()
         .accessibilityElement(children: .contain)
+        .notchCardHover()
     }
 }
 

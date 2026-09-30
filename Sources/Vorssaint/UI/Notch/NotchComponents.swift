@@ -13,9 +13,12 @@ struct NotchButtonStyle: ButtonStyle {
     @State private var hovered = false
     @Environment(\.isEnabled) private var enabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.notchPresentation) private var notchPresentation
+    @AppStorage(DefaultsKey.notchCardHoverEnabled) private var cardHoverEnabled = true
 
     func makeBody(configuration: Configuration) -> some View {
         let active = enabled && hovered
+        let lifted = active && (!notchPresentation || cornerRadius < 14 || cardHoverEnabled)
         configuration.label
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -24,7 +27,7 @@ struct NotchButtonStyle: ButtonStyle {
             }
             .opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.4)
             .scaleEffect(reduceMotion || !lifts ? 1
-                         : configuration.isPressed ? 0.965 : (active ? 1.022 : 1))
+                         : configuration.isPressed ? 0.965 : (lifted ? 1.022 : 1))
             .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.7),
                        value: configuration.isPressed)
             .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.75), value: hovered)
@@ -488,6 +491,7 @@ struct NotchControlSurface: ViewModifier {
     let cornerRadius: CGFloat
     var selected = false
     var interactive = true
+    var raised = false
     @AppStorage(DefaultsKey.notchLiquidGlassEnabled) private var glass = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
@@ -496,7 +500,7 @@ struct NotchControlSurface: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         Group {
-            if glassSurface {
+            if glassSurface && !raised {
                 content
                     .background(.white.opacity(selected ? 0.11 : 0.045), in: shape)
                     .overlay {
@@ -506,13 +510,13 @@ struct NotchControlSurface: ViewModifier {
             } else {
 #if compiler(>=6.2)
                 if #available(macOS 26, *), glass, !reduceTransparency {
-                    content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
+                    content.background(raised ? Color.black.opacity(0.4) : Color.white.opacity(selected ? 0.12 : 0.065), in: shape)
                         .glassEffect(.regular.interactive(interactive), in: shape)
                 } else {
-                    content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
+                    content.background(raised ? Color.black.opacity(0.92) : Color.white.opacity(selected ? 0.12 : 0.065), in: shape)
                 }
 #else
-                content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
+                content.background(raised ? Color.black.opacity(0.92) : Color.white.opacity(selected ? 0.12 : 0.065), in: shape)
 #endif
             }
         }

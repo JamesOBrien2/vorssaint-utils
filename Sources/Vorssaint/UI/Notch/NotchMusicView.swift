@@ -448,6 +448,7 @@ struct NotchMusicControlsView: View {
         .frame(maxWidth: .infinity)
         .frame(height: height)
         .modifier(NotchControlSurface(cornerRadius: 18))
+        .notchCardHover()
         .onAppear { if !preview { music.refreshAutomation() } }
     }
 }

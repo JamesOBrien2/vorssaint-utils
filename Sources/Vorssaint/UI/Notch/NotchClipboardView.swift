@@ -149,6 +149,8 @@ struct NotchClipboardView: View {
                         .foregroundStyle(.tertiary)
                         .accessibilityHidden(true)
                 }
+                NotchExpandButton(id: "clipboard.\(entry.id)", title: text.previewLabel,
+                                  onOpen: { searching = false })
                 if entry.kind == .image, AppFeature.screenshot.isAvailable {
                     NotchIconButton(symbol: "pencil", title: text.edit) { history.editImage(entry) }
                 }
@@ -170,6 +172,10 @@ struct NotchClipboardView: View {
                 .allowsHitTesting(false)
         }
         .clipped()
+        .notchCardHover()
+        .notchExpandable(id: "clipboard.\(entry.id)", title: text.previewLabel) {
+            NotchClipboardReader(id: entry.id, text: text)
+        }
         .contextMenu { actions(entry) }
         .accessibilityAction(named: Text(text.moveUp)) { move(entry, .up) }
         .accessibilityAction(named: Text(text.moveDown)) { move(entry, .down) }
@@ -291,6 +297,19 @@ struct NotchClipboardView: View {
                     .multilineTextAlignment(.leading)
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+}
+
+/// Resolve the selected entry from current history while the reader stays open.
+private struct NotchClipboardReader: View {
+    let id: UUID
+    let text: ClipboardFeatureStrings
+    @ObservedObject private var history = ClipboardHistoryService.shared
+
+    var body: some View {
+        if let entry = history.entries.first(where: { $0.id == id }) {
+            ClipboardEntryPreviewContent(text: text, entry: entry)
         }
     }
 }

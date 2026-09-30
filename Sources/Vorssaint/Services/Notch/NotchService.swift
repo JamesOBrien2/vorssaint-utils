@@ -1273,7 +1273,8 @@ final class NotchService: ObservableObject {
     }
 
     private func handleClipboardPasteKey(_ event: NSEvent) -> Bool {
-        guard selected == .clipboard, !showingAppPanel, !showingSections, selectedMetric == nil else { return false }
+        guard selected == .clipboard, !showingAppPanel, !showingSections, selectedMetric == nil,
+              pageLayers[.clipboard] == nil else { return false }
         let commandOnly = event.modifierFlags.intersection([.command, .control, .option, .shift]) == .command
         guard let index = NotchClipboardPastePress.index(keyCode: event.keyCode, commandOnly: commandOnly)
         else { return false }
@@ -2764,6 +2765,11 @@ final class NotchService: ObservableObject {
                 if self.handleClipboardPasteKey(event) { return nil }
             }
             if event.type == .keyDown, event.window === self.panel, self.selected == .tools, !self.showingAppPanel, !self.showingSections {
+                // A result reader gets its keys before the utility underneath.
+                if let close = self.pageLayers[.tools] {
+                    if event.keyCode == 53 { close(); return nil }
+                    return event
+                }
                 let launcher = QuickLauncherService.shared
                 // The rail reads across its rows until it scrolls; the
                 // editing grid keeps its own rows.

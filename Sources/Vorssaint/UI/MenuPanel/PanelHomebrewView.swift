@@ -495,7 +495,6 @@ struct PanelHomebrewView: View {
                     Text(desc)
                         .font(.system(size: 10.5))
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(spacing: 8) {

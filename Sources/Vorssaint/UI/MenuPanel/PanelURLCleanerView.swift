@@ -11,6 +11,7 @@ struct PanelURLCleanerView: View {
     @State private var input = ""
     @State private var output = ""
     @State private var message: String?
+    @Environment(\.notchExpansionActions) private var expansion
 
     var onClose: () -> Void
     private var canClearInput: Bool { !input.isEmpty || !output.isEmpty || message != nil }
@@ -114,15 +115,34 @@ struct PanelURLCleanerView: View {
                 .lineLimit(2)
         } else {
             VStack(alignment: .leading, spacing: 5) {
-                Text(output)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .lineLimit(3)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
+                HStack(alignment: .top, spacing: 6) {
+                    Text(output)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .lineLimit(3)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if expansion != nil {
+                        NotchExpandButton(id: "tools.urlResult", title: l10n.s.urlCleanerManualTitle)
+                    }
+                }
                 if let message {
                     Text(message)
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
+                }
+            }
+            .notchExpandable(id: "tools.urlResult", title: l10n.s.urlCleanerManualTitle) {
+                VStack(alignment: .leading, spacing: 8) {
+                    ClipboardTextPreview(text: output)
+                    HStack {
+                        if let message {
+                            Text(message).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        Button(l10n.s.urlCleanerCopyButton, action: copy)
+                            .controlSize(.small)
+                    }
                 }
             }
         }

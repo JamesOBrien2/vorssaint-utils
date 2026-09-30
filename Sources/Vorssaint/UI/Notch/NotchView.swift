@@ -201,19 +201,11 @@ struct NotchView: View {
         VStack(spacing: NotchLayout.spacing) {
             header.zIndex(1)
             Group {
-                if service.showingSections {
-                    NotchSectionsView(service: service)
-                } else if scrollsVertically {
-                    ScrollView {
-                        content
-                            .frame(height: contentOverflows ? pageSize.height : nil)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .padding(.bottom, 4)
-                            .contentShape(Rectangle())
-                    }
-                    .scrollIndicators(.automatic)
+                if showsDetail || service.showingSections {
+                    page
                 } else {
-                    content
+                    NotchCardExpansionHost(module: service.selected, size: service.contentSize) { page }
+                        .id(service.selected)
                 }
             }
             .frame(width: service.contentSize.width, height: service.contentSize.height, alignment: .top)
@@ -224,6 +216,23 @@ struct NotchView: View {
         .padding(.top, service.expandedGeometry.headerTopInset)
         .padding(.bottom, NotchLayout.bottomInset)
         .frame(width: service.expandedSize.width, height: service.expandedSize.height, alignment: .top)
+    }
+
+    @ViewBuilder private var page: some View {
+        if service.showingSections {
+            NotchSectionsView(service: service)
+        } else if scrollsVertically {
+            ScrollView {
+                content
+                    .frame(height: contentOverflows ? pageSize.height : nil)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(.bottom, 4)
+                    .contentShape(Rectangle())
+            }
+            .scrollIndicators(.automatic)
+        } else {
+            content
+        }
     }
 
     /// Keep each page's minimum usable layout reachable when a custom height
