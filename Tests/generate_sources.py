@@ -452,9 +452,15 @@ def main():
           + "}\n")
     usage = "Sources/Vorssaint/Services/SystemMonitor/ProcessUsageService.swift"
     write("ProcessForceQuit.swift", "import Darwin\nimport Foundation\n"
-          + "extension ProcessForceQuitTests {\nfinal class Service {\n"
+          + "extension ProcessForceQuitTests {\n"
+          + declaration(usage, "struct ProcessUsage:")
+          + "final class Service {\nprivate let maximumCachedRows = 60\n"
           + declaration(usage, "    func canForceQuit(")
           + declaration(usage, "    private static func executableName(")
+          + declaration(usage, "    private func withForceQuitIdentity(").replace("private func", "func", 1)
+          + declaration(usage, "    private static func processExisted(")
+          + declaration(usage, "    private func groupedByApp(").replace("private func", "func", 1)
+          + declaration(usage, "    private func groupedNetworkByApp(").replace("private func", "func", 1)
           + "}\n}\n")
     write("NotchActivationButton.swift", "import AppKit\n"
           + declaration("Sources/Vorssaint/Services/Notch/NotchWindowHost.swift", "final class NotchActivationButton:"))
