@@ -5,8 +5,9 @@ import Darwin
 import Foundation
 
 /// What one log line says, reduced to the few facts the island keeps. Only
-/// usage counters, model names, times and folder names leave a line; prompts,
-/// replies and tool output are never decoded into anything that is stored.
+/// usage counters, model names, times, folder names and the names of invoked
+/// skills leave a line; prompts, replies and tool output are
+/// never decoded into anything that is stored.
 enum AgentLogEntry: Equatable {
     /// `key` identifies the response across duplicate lines and files.
     case usage(key: String, record: AgentUsageRecord, billable: AgentBillable)
@@ -30,6 +31,10 @@ struct AgentLogState: Equatable {
     var lastTotal: AgentTokens?
     /// Codex runs the thread on the fast tier, which bills at a premium.
     var fast = false
+    /// Skills Codex loaded that its next response is charged with, and the
+    /// ones the current turn already counted.
+    var pendingSkills: [String: Int] = [:]
+    var turnSkills: Set<String> = []
 }
 
 enum AgentLogParser {
@@ -126,7 +131,8 @@ enum AgentLogParser {
             let priced = AgentPricing.cost(billable, model: model)
             entries.append(.usage(key: key, record: AgentUsageRecord(
                 provider: .claude, date: date, model: model, project: state.project, session: state.session,
-                tokens: billable.tokens, cost: priced.cost, savings: priced.savings), billable: billable))
+                tokens: billable.tokens, cost: priced.cost, savings: priced.savings,
+                skills: contains(line, #""name":"Skill""#) ? skills(message) : [:]), billable: billable))
         }
         // A subagent's own ending is not the end of the turn it serves.
         guard json["isSidechain"] as? Bool != true else { return entries }
@@ -162,6 +168,17 @@ enum AgentLogParser {
         }
     }
 
+    /// The skills a reply calls, by name. Only the name is read from the call.
+    private static func skills(_ message: [String: Any]) -> [String: Int] {
+        var found: [String: Int] = [:]
+        for block in message["content"] as? [[String: Any]] ?? []
+        where block["type"] as? String == "tool_use" && block["name"] as? String == "Skill" {
+            guard let name = (block["input"] as? [String: Any])?["skill"] as? String, !name.isEmpty else { continue }
+            found[native(name), default: 0] += 1
+        }
+        return found
+    }
+
     private static func adopt(_ json: [String: Any], into state: inout AgentLogState) {
         if let session = json["sessionId"] as? String, !session.isEmpty { state.session = native(session) }
         if let cwd = json["cwd"] as? String, !cwd.isEmpty { state.project = projectName(cwd) }
@@ -175,6 +192,11 @@ enum AgentLogParser {
         case "token_usage_record", "turn_context", "session_meta": break
         case "event_msg":
             guard let event = firstType(line, from: kind.end), codexEvents.contains(event.name) else { return [] }
+        case "response_item":
+            // Only a skill being loaded is worth decoding a response item for.
+            guard let item = firstType(line, from: kind.end),
+                  ["message", "function_call", "custom_tool_call"].contains(item.name),
+                  contains(line, "/SKILL.md") || contains(line, "<skill>") else { return [] }
         default: return []
         }
         guard let json = object(line), let payload = json["payload"] as? [String: Any] else { return [] }
@@ -183,6 +205,11 @@ enum AgentLogParser {
         case "session_meta":
             if let id = payload["id"] as? String, !id.isEmpty { state.session = native(id) }
             if let cwd = payload["cwd"] as? String, !cwd.isEmpty { state.project = projectName(cwd) }
+            return []
+        case "response_item":
+            for name in codexSkills(payload) where state.turnSkills.insert(name).inserted {
+                state.pendingSkills[name, default: 0] += 1
+            }
             return []
         case "turn_context":
             if let model = payload["model"] as? String, !model.isEmpty { state.model = native(model) }
@@ -197,7 +224,7 @@ enum AgentLogParser {
             }
             let response = payload["response_id"] as? String ?? ""
             let key = response.isEmpty ? "codex:\(state.session):\(date.timeIntervalSince1970)" : "codex:\(response)"
-            return [codexUsage(codexTokens(usage), key: key, date: date, state: state)]
+            return [codexUsage(codexTokens(usage), key: key, date: date, state: &state)]
         case "event_msg":
             return codexEvent(payload, date: date, state: &state)
         default:
@@ -236,7 +263,7 @@ enum AgentLogParser {
                                             reasoning: max(0, total.reasoning - previous.reasoning))
                     }
                     let key = "codex:\(state.session):total:\(total.total)"
-                    entries.append(codexUsage(delta, key: key, date: date, state: state))
+                    entries.append(codexUsage(delta, key: key, date: date, state: &state))
                 }
                 state.lastTotal = total
             }
@@ -248,6 +275,7 @@ enum AgentLogParser {
             return []
         case "task_started":
             state.turnOpen = true
+            state.turnSkills = []
             return [.turnBegan(seconds(payload["started_at"]) ?? date)]
         case "task_complete", "turn_aborted":
             let open = state.turnOpen
@@ -266,13 +294,49 @@ enum AgentLogParser {
         ["fast", "priority"].contains(tier.lowercased())
     }
 
-    private static func codexUsage(_ tokens: AgentTokens, key: String, date: Date, state: AgentLogState) -> AgentLogEntry {
+    private static func codexUsage(_ tokens: AgentTokens, key: String, date: Date,
+                                   state: inout AgentLogState) -> AgentLogEntry {
+        let skills = state.pendingSkills
+        state.pendingSkills = [:]
         var billable = AgentBillable(tokens: tokens)
         billable.fast = state.fast
         let priced = AgentPricing.cost(billable, model: state.model)
         return .usage(key: key, record: AgentUsageRecord(
             provider: .codex, date: date, model: state.model, project: state.project, session: state.session,
-            tokens: tokens, cost: priced.cost, savings: priced.savings), billable: billable)
+            tokens: tokens, cost: priced.cost, savings: priced.savings, skills: skills),
+            billable: billable)
+    }
+
+    /// Skills a response item loads: one the person invoked, which arrives
+    /// wrapped in `<skill>`, or one the model opens by its `SKILL.md`.
+    /// ponytail: a command that only edits a SKILL.md counts too; a turn
+    /// counts each skill once, which absorbs rereads.
+    static func codexSkills(_ payload: [String: Any]) -> [String] {
+        switch payload["type"] as? String {
+        case "message":
+            guard payload["role"] as? String == "user" else { return [] }
+            let texts = (payload["content"] as? [[String: Any]] ?? []).compactMap { $0["text"] as? String }
+            return texts.flatMap { text in
+                text.components(separatedBy: "<skill>").dropFirst().compactMap { block in
+                    guard let open = block.range(of: "<name>"),
+                          let close = block.range(of: "</name>", range: open.upperBound..<block.endIndex) else { return nil }
+                    return skillName(block[open.upperBound..<close.lowerBound])
+                }
+            }
+        case "function_call", "custom_tool_call":
+            let command = payload["arguments"] as? String ?? payload["input"] as? String ?? ""
+            return command.components(separatedBy: "/SKILL.md").dropLast().compactMap {
+                $0.split(whereSeparator: { "/\"' ".contains($0) }).last.flatMap { skillName($0) }
+            }
+        default:
+            return []
+        }
+    }
+
+    private static func skillName(_ text: Substring) -> String? {
+        let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 80, !name.contains(where: \.isWhitespace) else { return nil }
+        return native(name)
     }
 
     /// Input counts include what came from the cache.

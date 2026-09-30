@@ -95,6 +95,10 @@ struct NotchAgentsView: View {
                                 shares: snapshot.usage(shown).projects, byCost: snapshot.usage(shown).fullyPriced, text: text)
         case .activity:
             NotchAgentActivityCard(snapshot: snapshot, text: text)
+        case .tokens:
+            NotchAgentTokensCard(usage: snapshot.usage(shown), providers: providers, text: text)
+        case .skills:
+            NotchAgentSkillsCard(usage: snapshot.usage(shown), text: text)
         case .resets:
             NotchAgentResetsCard(now: now, text: text)
         }
@@ -570,8 +574,35 @@ private struct NotchAgentShareCard: View {
     let shares: [AgentShare]
     let byCost: Bool
     let text: NotchAgentStrings
+    /// The row opened into its token breakdown.
+    @State private var opened: String?
 
     var body: some View {
+        if let share = shares.first(where: { $0.id == opened }) {
+            NotchAgentCardChrome {
+                VStack(alignment: .leading, spacing: 7) {
+                    NotchAgentCardHeader(title: share.name, symbol: symbol) {
+                        Button { opened = nil } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8.5, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 16, height: 16)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(text.back)
+                        .accessibilityLabel(text.back)
+                    }
+                    NotchAgentTokenRings(rings: [NotchAgentTokenRings.Ring(id: share.id, tokens: share.totals.tokens)],
+                                         text: text)
+                }
+            }
+        } else {
+            list
+        }
+    }
+
+    @ViewBuilder private var list: some View {
         let shown = Array(shares.prefix(3))
         let peak = max(shown.map { $0.totals.weight(byCost: byCost) }.max() ?? 0, .leastNonzeroMagnitude)
         NotchAgentCardChrome {
@@ -591,25 +622,254 @@ private struct NotchAgentShareCard: View {
     private func row(_ share: AgentShare, peak: Double) -> some View {
         let weight = share.totals.weight(byCost: byCost)
         let tint = share.provider?.tint ?? .white
-        return HStack(spacing: 6) {
-            Text(share.name)
-                .font(.system(size: 10.5, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Capsule(style: .continuous)
-                .fill(tint.opacity(0.85))
-                .frame(width: max(3, 44 * weight / peak), height: 4)
-                .frame(width: 44, alignment: .leading)
-            Text(byCost ? AgentFormat.cost(share.totals.cost) : AgentFormat.tokens(share.totals.tokens.total))
-                .font(.system(size: 10, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 40, alignment: .trailing)
+        return Button { opened = share.id } label: {
+            HStack(spacing: 6) {
+                Text(share.name)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Capsule(style: .continuous)
+                    .fill(tint.opacity(0.85))
+                    .frame(width: max(3, 44 * weight / peak), height: 4)
+                    .frame(width: 44, alignment: .leading)
+                Text(byCost ? AgentFormat.cost(share.totals.cost) : AgentFormat.tokens(share.totals.tokens.total))
+                    .font(.system(size: 10, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 40, alignment: .trailing)
+            }
+            .frame(height: 14)
+            .contentShape(Rectangle())
         }
-        .frame(height: 14)
+        .buttonStyle(.plain)
         .help([share.name, text.tokens(AgentFormat.tokens(share.totals.tokens.total)),
                AgentFormat.cost(share.totals.cost)].joined(separator: " · "))
+    }
+}
+
+// MARK: Breakdowns
+
+/// Token kinds as rings beside one legend: a ring for each agent on the
+/// Tokens card, or one for a model or project opened on its card. Kinds never
+/// overlap, so each ring is exactly its total.
+private struct NotchAgentTokenRings: View {
+    struct Ring: Identifiable {
+        let id: String
+        var label: String? = nil
+        var tint: Color = .secondary
+        let tokens: AgentTokens
+    }
+
+    struct Part: Identifiable {
+        let id: String
+        let name: String
+        let value: Int
+        let color: Color
+        var note: String? = nil
+    }
+
+    let rings: [Ring]
+    let text: NotchAgentStrings
+
+    var body: some View {
+        let total = rings.reduce(into: AgentTokens()) { $0 += $1.tokens }
+        HStack(alignment: .center, spacing: 10) {
+            ForEach(rings) { ring($0) }
+            legend(total)
+        }
+    }
+
+    private func ring(_ ring: Ring) -> some View {
+        let parts = Self.parts(ring.tokens, text: text)
+        return VStack(spacing: 2) {
+            NotchAgentDonut(parts: parts)
+                .frame(width: 38, height: 38)
+                .overlay {
+                    Text(AgentFormat.tokens(ring.tokens.total))
+                        .font(.system(size: 9, weight: .semibold))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .padding(.horizontal, 6)
+                }
+            if let label = ring.label {
+                Text(label)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(ring.tint)
+                    .lineLimit(1)
+            }
+        }
+        .help(help(ring.label, parts))
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Each kind's count for one ring, with its reasoning where known.
+    private func help(_ label: String?, _ parts: [Part]) -> String {
+        var lines = label.map { [$0] } ?? []
+        for part in parts where part.value > 0 {
+            var line = part.name + " " + AgentFormat.tokens(part.value)
+            if let note = part.note { line += " (" + note + ")" }
+            lines.append(line)
+        }
+        return lines.joined(separator: " · ")
+    }
+
+    private func legend(_ tokens: AgentTokens) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Self.parts(tokens, text: text).filter { $0.value > 0 }) { part in
+                HStack(spacing: 5) {
+                    Circle().fill(part.color).frame(width: 6, height: 6)
+                    Text(part.name)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+                    Spacer(minLength: 2)
+                    Text(Self.share(part.value, of: tokens.total))
+                        .font(.system(size: 10, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .frame(height: 11)
+                .help(part.name + " " + AgentFormat.tokens(part.value))
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// A share that rounds to nothing but is not reads as under one percent.
+    static func share(_ value: Int, of total: Int) -> String {
+        let fraction = Double(value) / Double(max(total, 1))
+        return value > 0 && fraction < 0.005 ? "<" + AgentFormat.percent(0.01) : AgentFormat.percent(fraction)
+    }
+
+    /// Kinds of token that add up to a total. Reasoning is part of output,
+    /// so it is only mentioned there.
+    static func parts(_ tokens: AgentTokens, text: NotchAgentStrings) -> [Part] {
+        AgentTokenPart.allCases.map { part in
+            switch part {
+            case .input: return Part(id: "input", name: text.tokenInput, value: tokens.input, color: .blue)
+            case .cacheWrite:
+                return Part(id: "cacheWrite", name: text.tokenCacheWrite, value: tokens.cacheWrite, color: .orange)
+            case .cacheRead:
+                return Part(id: "cacheRead", name: text.tokenCacheRead, value: tokens.cacheRead, color: .teal)
+            case .output:
+                return Part(id: "output", name: text.tokenOutput, value: tokens.output, color: .pink,
+                            note: tokens.reasoning > 0 ? text.reasoning(AgentFormat.tokens(tokens.reasoning)) : nil)
+            }
+        }
+    }
+}
+
+/// Where the period's tokens went: a ring for each agent that used any.
+private struct NotchAgentTokensCard: View {
+    let usage: AgentPeriodUsage
+    let providers: [AgentProvider]
+    let text: NotchAgentStrings
+
+    var body: some View {
+        let tokens = usage.total.tokens
+        let rings = providers.compactMap { provider -> NotchAgentTokenRings.Ring? in
+            guard let used = usage.byProvider[provider]?.tokens, used.total > 0 else { return nil }
+            return NotchAgentTokenRings.Ring(id: provider.rawValue, label: provider.displayName,
+                                             tint: provider.tint, tokens: used)
+        }
+        NotchAgentCardChrome {
+            VStack(alignment: .leading, spacing: 6) {
+                NotchAgentCardHeader(title: text.tokensTitle, symbol: NotchAgentCard.tokens.symbol) {
+                    if tokens.total > 0 { NotchAgentHeaderFigure(value: AgentFormat.tokens(tokens.total)) }
+                }
+                if rings.isEmpty {
+                    Text(text.noActivity).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                } else {
+                    NotchAgentTokenRings(rings: rings, text: text)
+                }
+            }
+        }
+    }
+}
+
+/// Parts of a whole around a circle. Every part keeps a visible arc and the
+/// rest shares what is left.
+private struct NotchAgentDonut: View {
+    let parts: [NotchAgentTokenRings.Part]
+
+    var body: some View {
+        let shown = parts.filter { $0.value > 0 }
+        let total = Double(shown.reduce(0) { $0 + $1.value })
+        let gap = shown.count > 1 ? 0.015 : 0
+        let sliver = 0.02
+        let room = max(0, 1 - Double(shown.count) * (gap + sliver))
+        let lengths = shown.map { sliver + room * Double($0.value) / max(total, 1) }
+        ZStack {
+            Circle().stroke(.white.opacity(0.08), lineWidth: 5)
+            ForEach(shown.indices, id: \.self) { index in
+                let start = lengths[..<index].reduce(0, +) + gap * Double(index)
+                Circle()
+                    .trim(from: start, to: start + lengths[index])
+                    .stroke(shown[index].color, style: StrokeStyle(lineWidth: 5, lineCap: .butt))
+            }
+        }
+        .rotationEffect(.degrees(-90))
+        .padding(2.5)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Skills called in the period. A count beside the tokens, not a share of
+/// them: a skill is paid for by every later request that reads it.
+private struct NotchAgentSkillsCard: View {
+    let usage: AgentPeriodUsage
+    let text: NotchAgentStrings
+
+    var body: some View {
+        let calls = usage.skills.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+        let peak = Double(calls.first?.value ?? 1)
+        NotchAgentCardChrome {
+            VStack(alignment: .leading, spacing: 6) {
+                NotchAgentCardHeader(title: text.skillsTitle, symbol: NotchAgentCard.skills.symbol) {
+                    if !calls.isEmpty { NotchAgentHeaderFigure(value: "×\(calls.reduce(0) { $0 + $1.value })") }
+                }
+                if calls.isEmpty {
+                    Text(text.noActivity).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                } else {
+                    VStack(spacing: 5) {
+                        ForEach(calls.prefix(3), id: \.key) { call in
+                            HStack(spacing: 6) {
+                                Text(call.key)
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Capsule(style: .continuous)
+                                    .fill(Color.purple.gradient)
+                                    .frame(width: max(3, 44 * Double(call.value) / peak), height: 4)
+                                    .frame(width: 44, alignment: .leading)
+                                Text("×\(call.value)")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                                    .frame(minWidth: 28, alignment: .trailing)
+                            }
+                            .frame(height: 14)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A card's headline number, set small beside its title.
+private struct NotchAgentHeaderFigure: View {
+    let value: String
+
+    var body: some View {
+        Text(value)
+            .font(.system(size: 10, weight: .medium))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
     }
 }
 

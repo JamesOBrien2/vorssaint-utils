@@ -36,11 +36,12 @@ enum NotchAgentTests {
 
     private static func claudeAssistant(id: String = "msg_1", request: String = "req_1", model: String = "claude-opus-5-5",
                                         stop: String = "tool_use", output: Int = 225, time: String = "2026-09-21T23:42:45.078Z",
-                                        sidechain: Bool = false, cwd: String = "/Users/me/code/app") -> Data {
+                                        sidechain: Bool = false, cwd: String = "/Users/me/code/app",
+                                        content: String = #"{"type":"text","text":"\"type\":\"assistant\""}"#) -> Data {
         line("""
         {"parentUuid":"p","isSidechain":\(sidechain),"type":"assistant","timestamp":"\(time)","sessionId":"s1","cwd":"\(cwd)",\
         "version":"2.1.280","requestId":"\(request)","message":{"id":"\(id)","model":"\(model)","role":"assistant",\
-        "stop_reason":"\(stop)","content":[{"type":"text","text":"\\"type\\":\\"assistant\\""}],\
+        "stop_reason":"\(stop)","content":[\(content)],\
         "usage":{"input_tokens":2,"cache_creation_input_tokens":17218,"cache_read_input_tokens":43134,\
         "output_tokens":\(output),"output_tokens_details":{"thinking_tokens":32},\
         "cache_creation":{"ephemeral_1h_input_tokens":17218,"ephemeral_5m_input_tokens":0},\
@@ -263,6 +264,22 @@ enum NotchAgentTests {
                     file: "a", provider: .claude, tracksTurns: false, modified: now)
         suite.expect(store.records.count == 1 && store.records.first?.tokens.output == 400,
                      "dropping old history keeps later lookups consistent")
+
+        // Skill calls are counted by name, once per reply however it streams.
+        let skill = #"{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"grill-me","args":"secret"}}"#
+        let skills = AgentUsageStore()
+        for (output, content) in [(8, #"{"type":"text","text":"hi"}"#), (334, skill), (334, skill)] {
+            var local = AgentLogState()
+            skills.apply(AgentLogParser.parseClaude(claudeAssistant(output: output, content: content), state: &local, now: now),
+                         file: "a", provider: .claude, tracksTurns: false, modified: now)
+        }
+        suite.expect(skills.records.count == 1 && skills.records.first?.skills == ["grill-me": 1],
+                     "a skill called from a later block of the reply is counted once")
+        var plain = AgentLogState()
+        suite.expect(AgentLogParser.parseClaude(claudeAssistant(), state: &plain, now: now).contains {
+            if case .usage(_, let record, _) = $0 { return record.skills.isEmpty }
+            return false
+        }, "a reply without skills carries none")
     }
 
     private static func claudeTurns(_ suite: TestSuite) {
@@ -450,6 +467,22 @@ enum NotchAgentTests {
                                                      state: &quiet, now: now).isEmpty
                         && quiet == AgentLogState(turnOpen: true),
                      "records quoted inside another line's payload are not read as the line's own")
+
+        // Skills are counted once per turn, whether invoked or opened by the model.
+        var helper = AgentLogState()
+        let helperMeta = line(#"{"timestamp":"2026-09-22T14:44:23.705Z","type":"session_meta","payload":{"id":"s10","cwd":"/Users/me/code/web","source":{"subagent":{"thread_spawn":{"parent_thread_id":"s9","depth":1,"agent_nickname":"Ada","agent_role":"explorer"}}}}}"#)
+        let listing = line(#"{"timestamp":"2026-09-22T14:44:24.000Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<skill><name>listed</name> /s/listed/SKILL.md"}]}}"#)
+        let invoked = line(#"{"timestamp":"2026-09-22T14:44:25.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<skill>\n<name>grill-me</name>\n<path>/s/grill-me/SKILL.md</path>"}]}}"#)
+        let opened = line(#"{"timestamp":"2026-09-22T14:44:26.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"sed -n 1,200p /Users/me/.codex/skills/pdf/SKILL.md && cat '/s/grill-me/SKILL.md'\"}"}}"#)
+        var helperEntries: [AgentLogEntry] = []
+        for data in [helperMeta, started, listing, invoked, opened, record] {
+            helperEntries += AgentLogParser.parseCodex(data, state: &helper, now: now)
+        }
+        guard case .usage(_, let spawned, _)? = helperEntries.last else {
+            suite.expect(false, "a spawned thread's response is read")
+            return
+        }
+        suite.expect(spawned.skills == ["grill-me": 1, "pdf": 1], "each skill a turn loads counts once")
     }
 
     private static func timestamps(_ suite: TestSuite) {
@@ -1022,7 +1055,8 @@ enum NotchAgentTests {
 
         defaults.set("trend,unknown,trend,spend", forKey: DefaultsKey.notchAgentsCardOrder)
         defaults.set("activity,projects", forKey: DefaultsKey.notchAgentsHiddenCards)
-        suite.expect(NotchAgentSupport.cards(in: defaults) == [.trend, .spend, .limits, .live, .models, .resets],
+        suite.expect(NotchAgentSupport.cards(in: defaults) == [.trend, .spend, .limits, .live, .models, .resets,
+                                                                .tokens, .skills],
                      "the saved order ignores unknown and repeated cards and appends new ones")
         defaults.set(false, forKey: DefaultsKey.notchAgentsCodex)
         suite.expect(NotchAgentSupport.providers(in: defaults) == [.claude], "an agent can be left out")

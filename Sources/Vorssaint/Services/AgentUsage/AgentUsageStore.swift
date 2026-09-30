@@ -113,8 +113,13 @@ final class AgentUsageStore {
         if let position = index[key] {
             let old = records[position]
             let merged = old.tokens.merged(with: record.tokens)
-            guard merged != old.tokens else { return }
+            // A skill can be called from a later block of the same reply.
+            // ponytail: the same skill called twice in one reply counts once;
+            // count per block id if that ever matters.
+            let skills = old.skills.merging(record.skills, uniquingKeysWith: max)
+            guard merged != old.tokens || skills != old.skills else { return }
             summary.recordChanged(at: position, previous: old)
+            records[position].skills = skills
             var combined = billables[position]
             combined.tokens = merged
             combined.longCacheWrite = max(combined.longCacheWrite, billable.longCacheWrite)
