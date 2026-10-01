@@ -109,6 +109,8 @@ struct NotchAgentStrings {
     let reasoningFormat: String
     let skillsTitle: String
     let back: String
+    let skillsByYou: String
+    let skillsByAgent: String
 
     func tokens(_ count: String) -> String { String(format: tokensFormat, count) }
     func cached(_ share: String) -> String { String(format: cachedFormat, share) }
@@ -304,7 +306,9 @@ extension NotchAgentStrings {
         tokenOutput: "Output",
         reasoningFormat: "Includes %@ of reasoning",
         skillsTitle: "Skills",
-        back: "Back")
+        back: "Back",
+        skillsByYou: "Started by you",
+        skillsByAgent: "Called by the agent")
 
     static let uk = NotchAgentStrings(
         title: "ШІ-агенти",
@@ -411,7 +415,9 @@ extension NotchAgentStrings {
         tokenOutput: "Вихід",
         reasoningFormat: "Включно з %@ міркувань",
         skillsTitle: "Навички",
-        back: "Назад")
+        back: "Назад",
+        skillsByYou: "Запущено вами",
+        skillsByAgent: "Викликано агентом")
 
     static let ptBR = NotchAgentStrings(
         title: "Agentes de IA",
@@ -518,7 +524,9 @@ extension NotchAgentStrings {
         tokenOutput: "Saída",
         reasoningFormat: "Inclui %@ de raciocínio",
         skillsTitle: "Skills",
-        back: "Voltar")
+        back: "Voltar",
+        skillsByYou: "Iniciadas por você",
+        skillsByAgent: "Chamadas pelo agente")
 
     static let es = NotchAgentStrings(
         title: "Agentes de IA",
@@ -625,7 +633,9 @@ extension NotchAgentStrings {
         tokenOutput: "Salida",
         reasoningFormat: "Incluye %@ de razonamiento",
         skillsTitle: "Skills",
-        back: "Atrás")
+        back: "Atrás",
+        skillsByYou: "Iniciadas por ti",
+        skillsByAgent: "Llamadas por el agente")
 
     static let sk = NotchAgentStrings(
         title: "AI agenti",
@@ -732,7 +742,9 @@ extension NotchAgentStrings {
         tokenOutput: "Výstup",
         reasoningFormat: "Vrátane %@ uvažovania",
         skillsTitle: "Skills",
-        back: "Späť")
+        back: "Späť",
+        skillsByYou: "Spustené vami",
+        skillsByAgent: "Volané agentom")
 
     static let de = NotchAgentStrings(
         title: "KI-Agenten",
@@ -839,7 +851,9 @@ extension NotchAgentStrings {
         tokenOutput: "Ausgabe",
         reasoningFormat: "Enthält %@ Reasoning",
         skillsTitle: "Skills",
-        back: "Zurück")
+        back: "Zurück",
+        skillsByYou: "Von dir gestartet",
+        skillsByAgent: "Vom Agenten aufgerufen")
 
     static let fr = NotchAgentStrings(
         title: "Agents IA",
@@ -946,7 +960,9 @@ extension NotchAgentStrings {
         tokenOutput: "Sortie",
         reasoningFormat: "Dont %@ de raisonnement",
         skillsTitle: "Skills",
-        back: "Retour")
+        back: "Retour",
+        skillsByYou: "Lancées par vous",
+        skillsByAgent: "Appelées par l’agent")
 
     static let it = NotchAgentStrings(
         title: "Agenti IA",
@@ -1053,7 +1069,9 @@ extension NotchAgentStrings {
         tokenOutput: "Output",
         reasoningFormat: "Include %@ di ragionamento",
         skillsTitle: "Skill",
-        back: "Indietro")
+        back: "Indietro",
+        skillsByYou: "Avviate da te",
+        skillsByAgent: "Chiamate dall’agente")
 
     static let ru = NotchAgentStrings(
         title: "ИИ-агенты",
@@ -1160,7 +1178,9 @@ extension NotchAgentStrings {
         tokenOutput: "Вывод",
         reasoningFormat: "Включая %@ рассуждений",
         skillsTitle: "Навыки",
-        back: "Назад")
+        back: "Назад",
+        skillsByYou: "Запущены вами",
+        skillsByAgent: "Вызваны агентом")
 
     static let tr = NotchAgentStrings(
         title: "YZ Ajanları",
@@ -1267,7 +1287,9 @@ extension NotchAgentStrings {
         tokenOutput: "Çıktı",
         reasoningFormat: "%@ akıl yürütme dahil",
         skillsTitle: "Beceriler",
-        back: "Geri")
+        back: "Geri",
+        skillsByYou: "Sizin başlattıklarınız",
+        skillsByAgent: "Ajanın çağırdıkları")
 
     static let ja = NotchAgentStrings(
         title: "AIエージェント",
@@ -1374,7 +1396,9 @@ extension NotchAgentStrings {
         tokenOutput: "出力",
         reasoningFormat: "うち推論 %@",
         skillsTitle: "スキル",
-        back: "戻る")
+        back: "戻る",
+        skillsByYou: "自分で起動",
+        skillsByAgent: "エージェントが呼び出し")
 
     static let ko = NotchAgentStrings(
         title: "AI 에이전트",
@@ -1481,7 +1505,9 @@ extension NotchAgentStrings {
         tokenOutput: "출력",
         reasoningFormat: "추론 %@ 포함",
         skillsTitle: "스킬",
-        back: "뒤로")
+        back: "뒤로",
+        skillsByYou: "직접 시작",
+        skillsByAgent: "에이전트가 호출")
 
     static let zhHans = NotchAgentStrings(
         title: "AI 智能体",
@@ -1581,14 +1607,16 @@ extension NotchAgentStrings {
         resetsUpdate: "请更新 Codex 以在此使用重置",
         resetsCheckFailed: "无法检查重置",
         resetsHelp: "一次重置会同时恢复 Codex 的会话额度和每周额度。Codex 用自己的登录信息检查你的重置，Vorssaint 从不读取这些信息。",
-        tokensTitle: "Token",
+        tokensTitle: "令牌",
         tokenInput: "输入",
         tokenCacheWrite: "缓存写入",
         tokenCacheRead: "缓存读取",
         tokenOutput: "输出",
         reasoningFormat: "含 %@ 推理",
         skillsTitle: "技能",
-        back: "返回")
+        back: "返回",
+        skillsByYou: "由你启动",
+        skillsByAgent: "由代理调用")
 
     static let zhTW = NotchAgentStrings(
         title: "AI 代理",
@@ -1695,7 +1723,9 @@ extension NotchAgentStrings {
         tokenOutput: "輸出",
         reasoningFormat: "含 %@ 推理",
         skillsTitle: "技能",
-        back: "返回")
+        back: "返回",
+        skillsByYou: "由你啟動",
+        skillsByAgent: "由代理呼叫")
 
     static let zhHK = NotchAgentStrings(
         title: "AI 代理",
@@ -1802,5 +1832,7 @@ extension NotchAgentStrings {
         tokenOutput: "輸出",
         reasoningFormat: "含 %@ 推理",
         skillsTitle: "技能",
-        back: "返回")
+        back: "返回",
+        skillsByYou: "由你啟動",
+        skillsByAgent: "由代理呼叫")
 }

@@ -168,6 +168,7 @@ final class AgentUsageStore {
             if !sources[position].contains(source) { sources[position].append(source) }
             let old = records[position]
             let merged = old.tokens.merged(with: record.tokens)
+            let skills = old.skills.merging(record.skills, uniquingKeysWith: +)
             if merged == old.tokens {
                 if record.provider == .opencode {
                     let newCost: Double?
@@ -195,9 +196,10 @@ final class AgentUsageStore {
                         }
                     }
                 }
-                return
+                if skills == old.skills { return }
             }
             summary.recordChanged(at: position, previous: old)
+            records[position].skills = skills
             var combined = billables[position]
             combined.tokens = merged
             combined.longCacheWrite = max(combined.longCacheWrite, billable.longCacheWrite)

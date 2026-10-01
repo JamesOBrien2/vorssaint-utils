@@ -63,6 +63,28 @@ struct AgentTokens: Equatable {
     }
 }
 
+/// The parts of a total that never overlap. Reasoning is inside `output`.
+enum AgentTokenPart: CaseIterable {
+    case input, cacheWrite, cacheRead, output
+}
+
+extension AgentTokens {
+    subscript(part: AgentTokenPart) -> Int {
+        switch part {
+        case .input: return input
+        case .cacheWrite: return cacheWrite
+        case .cacheRead: return cacheRead
+        case .output: return output
+        }
+    }
+}
+
+/// A skill and who started it.
+struct AgentSkill: Hashable {
+    let name: String
+    let byPerson: Bool
+}
+
 /// One billed model response.
 struct AgentUsageRecord: Equatable {
     let provider: AgentProvider
@@ -78,6 +100,8 @@ struct AgentUsageRecord: Equatable {
     var cost: Double?
     /// What cache reads saved against paying the full input price.
     var savings: Double
+    /// Skills started or loaded before this response.
+    var skills: [AgentSkill: Int] = [:]
     /// Whether cost was reported directly by the provider rather than derived from list pricing.
     var reportedCost: Bool = false
 
