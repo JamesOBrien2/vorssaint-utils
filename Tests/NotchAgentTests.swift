@@ -273,8 +273,26 @@ enum NotchAgentTests {
             skills.apply(AgentLogParser.parseClaude(claudeAssistant(output: output, content: content), state: &local, now: now),
                          file: "a", provider: .claude, tracksTurns: false, modified: now)
         }
-        suite.expect(skills.records.count == 1 && skills.records.first?.skills == ["grill-me": 1],
+        suite.expect(skills.records.count == 1 && skills.records.first?.skills == [AgentSkill(name: "grill-me", byPerson: false): 1],
                      "a skill called from a later block of the reply is counted once")
+
+        // A slash command loads its skill on a meta line; the model's own
+        // call loads one too, but is counted from the call.
+        var started = AgentLogState()
+        let base = "Base directory for this skill: /Users/me/.claude/plugins/cache/kit/kit/1.0/skills/"
+        var startedEntries: [AgentLogEntry] = []
+        for data in [claudeUser("<command-name>/kit:polish</command-name>"),
+                     claudeUser(base + "polish\\n\\n# Polish", meta: true),
+                     line(#"{"type":"user","sessionId":"s1","isMeta":true,"sourceToolUseID":"t1","message":{"role":"user","content":[{"type":"text","text":"\#(base)grill-me"}]}}"#),
+                     claudeAssistant(content: #"{"type":"tool_use","id":"t2","name":"Skill","input":{"skill":"kit:polish"}}"#)] {
+            startedEntries += AgentLogParser.parseClaude(data, state: &started, now: now)
+        }
+        suite.expect(startedEntries.contains {
+            if case .usage(_, let record, _) = $0 {
+                return record.skills == [AgentSkill(name: "polish", byPerson: true): 1, AgentSkill(name: "polish", byPerson: false): 1]
+            }
+            return false
+        } && started.pendingSkills.isEmpty, "a skill the person starts counts apart from the ones the model calls")
         var plain = AgentLogState()
         suite.expect(AgentLogParser.parseClaude(claudeAssistant(), state: &plain, now: now).contains {
             if case .usage(_, let record, _) = $0 { return record.skills.isEmpty }
@@ -473,16 +491,18 @@ enum NotchAgentTests {
         let helperMeta = line(#"{"timestamp":"2026-09-22T14:44:23.705Z","type":"session_meta","payload":{"id":"s10","cwd":"/Users/me/code/web","source":{"subagent":{"thread_spawn":{"parent_thread_id":"s9","depth":1,"agent_nickname":"Ada","agent_role":"explorer"}}}}}"#)
         let listing = line(#"{"timestamp":"2026-09-22T14:44:24.000Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<skill><name>listed</name> /s/listed/SKILL.md"}]}}"#)
         let invoked = line(#"{"timestamp":"2026-09-22T14:44:25.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<skill>\n<name>grill-me</name>\n<path>/s/grill-me/SKILL.md</path>"}]}}"#)
-        let opened = line(#"{"timestamp":"2026-09-22T14:44:26.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"sed -n 1,200p /Users/me/.codex/skills/pdf/SKILL.md && cat '/s/grill-me/SKILL.md'\"}"}}"#)
+        let opened = line(#"{"timestamp":"2026-09-22T14:44:26.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"sed -n 1,200p /Users/me/.codex/skills/pdf/SKILL.md && cat '/s/grill-me/SKILL.md' && ls /s/*/SKILL.md /s/{a,b}/SKILL.md $dir/SKILL.md\"}"}}"#)
+        let patched = line(#"{"timestamp":"2026-09-22T14:44:27.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Update File: /s/edited/SKILL.md"}}"#)
         var helperEntries: [AgentLogEntry] = []
-        for data in [helperMeta, started, listing, invoked, opened, record] {
+        for data in [helperMeta, started, listing, invoked, opened, patched, record] {
             helperEntries += AgentLogParser.parseCodex(data, state: &helper, now: now)
         }
         guard case .usage(_, let spawned, _)? = helperEntries.last else {
             suite.expect(false, "a spawned thread's response is read")
             return
         }
-        suite.expect(spawned.skills == ["grill-me": 1, "pdf": 1], "each skill a turn loads counts once")
+        suite.expect(spawned.skills == [AgentSkill(name: "grill-me", byPerson: true): 1, AgentSkill(name: "pdf", byPerson: false): 1],
+                     "each skill a turn loads counts once, by who started it")
     }
 
     private static func timestamps(_ suite: TestSuite) {

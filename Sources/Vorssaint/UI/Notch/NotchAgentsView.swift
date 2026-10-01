@@ -715,9 +715,13 @@ private struct NotchAgentTokenRings: View {
         return lines.joined(separator: " · ")
     }
 
+    /// Beside two rings a name has no room to share with its percentage,
+    /// which then moves to the tooltip.
     private func legend(_ tokens: AgentTokens) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        let roomy = rings.count < 2
+        return VStack(alignment: .leading, spacing: 2) {
             ForEach(Self.parts(tokens, text: text).filter { $0.value > 0 }) { part in
+                let share = Self.share(part.value, of: tokens.total)
                 HStack(spacing: 5) {
                     Circle().fill(part.color).frame(width: 6, height: 6)
                     Text(part.name)
@@ -725,13 +729,15 @@ private struct NotchAgentTokenRings: View {
                         .foregroundStyle(.white.opacity(0.85))
                         .lineLimit(1)
                     Spacer(minLength: 2)
-                    Text(Self.share(part.value, of: tokens.total))
-                        .font(.system(size: 10, weight: .medium))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                    if roomy {
+                        Text(share)
+                            .font(.system(size: 10, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .frame(height: 11)
-                .help(part.name + " " + AgentFormat.tokens(part.value))
+                .help(part.name + " " + AgentFormat.tokens(part.value) + (roomy ? "" : " · " + share))
             }
         }
         .frame(maxWidth: .infinity)
@@ -816,47 +822,96 @@ private struct NotchAgentDonut: View {
     }
 }
 
-/// Skills called in the period. A count beside the tokens, not a share of
-/// them: a skill is paid for by every later request that reads it.
+/// Skills started in the period, by the person and by the agent. A count
+/// beside the tokens, not a share of them: a skill is paid for by every
+/// later request that reads it.
 private struct NotchAgentSkillsCard: View {
     let usage: AgentPeriodUsage
     let text: NotchAgentStrings
 
+    private struct Row {
+        let name: String
+        var person = 0
+        var agent = 0
+        var total: Int { person + agent }
+    }
+
+    private static let personTint = Color.mint
+    private static let agentTint = Color.purple
+
+    private var rows: [Row] {
+        var rows: [String: Row] = [:]
+        for (skill, count) in usage.skills {
+            if skill.byPerson { rows[skill.name, default: Row(name: skill.name)].person += count }
+            else { rows[skill.name, default: Row(name: skill.name)].agent += count }
+        }
+        return rows.values.sorted { $0.total != $1.total ? $0.total > $1.total : $0.name < $1.name }
+    }
+
     var body: some View {
-        let calls = usage.skills.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
-        let peak = Double(calls.first?.value ?? 1)
+        let rows = rows
+        let peak = Double(rows.first?.total ?? 1)
         NotchAgentCardChrome {
             VStack(alignment: .leading, spacing: 6) {
                 NotchAgentCardHeader(title: text.skillsTitle, symbol: NotchAgentCard.skills.symbol) {
-                    if !calls.isEmpty { NotchAgentHeaderFigure(value: "×\(calls.reduce(0) { $0 + $1.value })") }
+                    HStack(spacing: 6) {
+                        origin(rows.reduce(0) { $0 + $1.person }, tint: Self.personTint, label: text.skillsByYou)
+                        origin(rows.reduce(0) { $0 + $1.agent }, tint: Self.agentTint, label: text.skillsByAgent)
+                    }
                 }
-                if calls.isEmpty {
+                if rows.isEmpty {
                     Text(text.noActivity).font(.system(size: 10.5)).foregroundStyle(.secondary)
                 } else {
                     VStack(spacing: 5) {
-                        ForEach(calls.prefix(3), id: \.key) { call in
-                            HStack(spacing: 6) {
-                                Text(call.key)
-                                    .font(.system(size: 10.5, weight: .medium))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                Capsule(style: .continuous)
-                                    .fill(Color.purple.gradient)
-                                    .frame(width: max(3, 44 * Double(call.value) / peak), height: 4)
-                                    .frame(width: 44, alignment: .leading)
-                                Text("×\(call.value)")
-                                    .font(.system(size: 10, weight: .medium))
-                                    .monospacedDigit()
-                                    .foregroundStyle(.secondary)
-                                    .frame(minWidth: 28, alignment: .trailing)
-                            }
-                            .frame(height: 14)
-                        }
+                        ForEach(rows.prefix(3), id: \.name) { row($0, peak: peak) }
                     }
                 }
             }
         }
+    }
+
+    /// One side's count in the header, which doubles as the bars' legend.
+    @ViewBuilder
+    private func origin(_ count: Int, tint: Color, label: String) -> some View {
+        if count > 0 {
+            HStack(spacing: 3) {
+                Circle().fill(tint).frame(width: 5, height: 5)
+                NotchAgentHeaderFigure(value: "×\(count)")
+            }
+            .help(label)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(label) ×\(count)")
+        }
+    }
+
+    private func row(_ row: Row, peak: Double) -> some View {
+        HStack(spacing: 6) {
+            Text(row.name)
+                .font(.system(size: 10.5, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 1) {
+                if row.person > 0 { bar(row.person, peak: peak, tint: Self.personTint) }
+                if row.agent > 0 { bar(row.agent, peak: peak, tint: Self.agentTint) }
+            }
+            .frame(width: 44, alignment: .leading)
+            Text("×\(row.total)")
+                .font(.system(size: 10, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 28, alignment: .trailing)
+        }
+        .frame(height: 14)
+        .help([row.name, row.person > 0 ? "\(text.skillsByYou) ×\(row.person)" : nil,
+               row.agent > 0 ? "\(text.skillsByAgent) ×\(row.agent)" : nil].compactMap { $0 }
+            .joined(separator: " · "))
+    }
+
+    private func bar(_ count: Int, peak: Double, tint: Color) -> some View {
+        Capsule(style: .continuous)
+            .fill(tint.gradient)
+            .frame(width: max(3, 40 * Double(count) / peak), height: 4)
     }
 }
 

@@ -72,6 +72,12 @@ extension AgentTokens {
     }
 }
 
+/// A skill and who started it: the person, by command, or the agent itself.
+struct AgentSkill: Hashable {
+    let name: String
+    let byPerson: Bool
+}
+
 /// One billed model response.
 struct AgentUsageRecord: Equatable {
     let provider: AgentProvider
@@ -85,9 +91,9 @@ struct AgentUsageRecord: Equatable {
     var cost: Double?
     /// What cache reads saved against paying the full input price.
     var savings: Double
-    /// Skills the response invoked, by name. A count of calls, not tokens:
-    /// a skill's cost is spread over the requests that read it afterwards.
-    var skills: [String: Int] = [:]
+    /// Skills the response loaded. A count of starts, not tokens: a skill's
+    /// cost is spread over the requests that read it afterwards.
+    var skills: [AgentSkill: Int] = [:]
 }
 
 /// A usage allowance and how much of it is spent, as the provider reports it.

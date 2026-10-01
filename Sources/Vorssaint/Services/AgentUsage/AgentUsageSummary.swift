@@ -57,8 +57,8 @@ struct AgentPeriodUsage: Equatable {
     var byProvider: [AgentProvider: AgentTotals] = [:]
     var models: [AgentShare] = []
     var projects: [AgentShare] = []
-    /// Skill calls by name, beside the tokens rather than part of them.
-    var skills: [String: Int] = [:]
+    /// Skill starts, beside the tokens rather than part of them.
+    var skills: [AgentSkill: Int] = [:]
 
     /// Whether every response in the period could be priced.
     var fullyPriced: Bool { total.unpriced == 0 }

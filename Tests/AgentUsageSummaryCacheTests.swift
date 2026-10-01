@@ -19,7 +19,7 @@ enum AgentUsageSummaryCacheTests {
             let cost: Double? = index % 13 == 0 ? nil : Double(index % 11) / 8
             return AgentUsageRecord(provider: provider, date: date, model: model, project: "p\(index % 7)",
                                     session: "s", tokens: tokens, cost: cost, savings: 0.125,
-                                    skills: provider == .claude && index % 9 == 0 ? ["grill-me": 1 + index % 2] : [:])
+                                    skills: provider == .claude && index % 9 == 0 ? [AgentSkill(name: "grill-me", byPerson: index % 2 == 0): 1 + index % 2] : [:])
         }
         var providers = Set(AgentProvider.allCases)
         var live: [AgentLiveSession] = []
@@ -75,7 +75,7 @@ enum AgentUsageSummaryCacheTests {
         // A reply that calls a skill from a later block.
         cache.recordChanged(at: 18, previous: records[18])
         records[18].tokens.output += 3
-        records[18].skills["openbabel", default: 0] += 1
+        records[18].skills[AgentSkill(name: "review", byPerson: false), default: 0] += 1
         check("streaming updates skill calls")
         breakdown(suite, records: records, now: now, calendar: calendar)
         now = now.addingTimeInterval(3_600)
@@ -114,7 +114,7 @@ enum AgentUsageSummaryCacheTests {
             month.byProvider.values.reduce(0) { $0 + $1.tokens[part] } == tokens[part]
         } && month.byProvider.count == 2, "each agent's token kinds add up to the shared total")
         let calls = records.filter { $0.provider == .claude && $0.date > now.addingTimeInterval(-30 * 86_400) }
-        suite.expect(month.skills["grill-me"] ?? 0 > 0 && month.skills.values.reduce(0, +) <= calls.reduce(0) {
+        suite.expect(month.skills[AgentSkill(name: "grill-me", byPerson: true)] ?? 0 > 0 && month.skills.values.reduce(0, +) <= calls.reduce(0) {
             $0 + $1.skills.values.reduce(0, +)
         }, "skill calls are counted beside tokens")
         let codex = AgentUsageSummary.snapshot(records: records.filter { $0.provider == .codex }, limits: [:], live: [],

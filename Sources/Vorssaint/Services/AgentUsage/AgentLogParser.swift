@@ -31,9 +31,9 @@ struct AgentLogState: Equatable {
     var lastTotal: AgentTokens?
     /// Codex runs the thread on the fast tier, which bills at a premium.
     var fast = false
-    /// Skills Codex loaded that its next response is charged with, and the
-    /// ones the current turn already counted.
-    var pendingSkills: [String: Int] = [:]
+    /// Skills loaded that the next response is charged with, and the ones
+    /// the current Codex turn already counted.
+    var pendingSkills: [AgentSkill: Int] = [:]
     var turnSkills: Set<String> = []
 }
 
@@ -91,6 +91,13 @@ enum AgentLogParser {
             state.turnOpen = false
             return open ? [.turnEnded(nil, completed: false, duration: nil)] : []
         }
+        // A skill the person starts with a slash command is loaded by a meta
+        // line of its own. One the model calls names the call it answers,
+        // and is counted from the call instead.
+        if contains(line, "Base directory for this skill: "), let json = object(line),
+           json["isMeta"] as? Bool == true, json["sourceToolUseID"] == nil, let name = startedSkill(json) {
+            state.pendingSkills[AgentSkill(name: name, byPerson: true), default: 0] += 1
+        }
         // Tool results arrive inside a turn and can be large; while a turn is
         // open, the line only has to say that work goes on.
         if state.turnOpen { return [.turnActive(nil)] }
@@ -129,10 +136,13 @@ enum AgentLogParser {
             let key = id.isEmpty && request.isEmpty
                 ? "claude:\(state.session):\(date.timeIntervalSince1970)" : "claude:\(id):\(request)"
             let priced = AgentPricing.cost(billable, model: model)
+            var skills = contains(line, #""name":"Skill""#) ? skills(message) : [:]
+            skills.merge(state.pendingSkills, uniquingKeysWith: +)
+            state.pendingSkills = [:]
             entries.append(.usage(key: key, record: AgentUsageRecord(
                 provider: .claude, date: date, model: model, project: state.project, session: state.session,
-                tokens: billable.tokens, cost: priced.cost, savings: priced.savings,
-                skills: contains(line, #""name":"Skill""#) ? skills(message) : [:]), billable: billable))
+                tokens: billable.tokens, cost: priced.cost, savings: priced.savings, skills: skills),
+                billable: billable))
         }
         // A subagent's own ending is not the end of the turn it serves.
         guard json["isSidechain"] as? Bool != true else { return entries }
@@ -168,15 +178,28 @@ enum AgentLogParser {
         }
     }
 
-    /// The skills a reply calls, by name. Only the name is read from the call.
-    private static func skills(_ message: [String: Any]) -> [String: Int] {
-        var found: [String: Int] = [:]
+    /// The skills a reply calls. Only the name is read from the call.
+    private static func skills(_ message: [String: Any]) -> [AgentSkill: Int] {
+        var found: [AgentSkill: Int] = [:]
         for block in message["content"] as? [[String: Any]] ?? []
         where block["type"] as? String == "tool_use" && block["name"] as? String == "Skill" {
-            guard let name = (block["input"] as? [String: Any])?["skill"] as? String, !name.isEmpty else { continue }
-            found[native(name), default: 0] += 1
+            guard let name = ((block["input"] as? [String: Any])?["skill"] as? String).flatMap({ skillName($0[...]) })
+            else { continue }
+            found[AgentSkill(name: name, byPerson: false), default: 0] += 1
         }
         return found
+    }
+
+    /// The skill a slash command loaded, named by the folder it was read from.
+    private static func startedSkill(_ json: [String: Any]) -> String? {
+        let content = (json["message"] as? [String: Any])?["content"]
+        let text = content as? String
+            ?? (content as? [[String: Any]])?.first.flatMap { $0["text"] as? String } ?? ""
+        let prefix = "Base directory for this skill: "
+        guard text.hasPrefix(prefix),
+              let folder = text.dropFirst(prefix.count).split(separator: "\n", maxSplits: 1).first,
+              let name = folder.split(separator: "/").last else { return nil }
+        return skillName(name)
     }
 
     private static func adopt(_ json: [String: Any], into state: inout AgentLogState) {
@@ -207,8 +230,8 @@ enum AgentLogParser {
             if let cwd = payload["cwd"] as? String, !cwd.isEmpty { state.project = projectName(cwd) }
             return []
         case "response_item":
-            for name in codexSkills(payload) where state.turnSkills.insert(name).inserted {
-                state.pendingSkills[name, default: 0] += 1
+            for skill in codexSkills(payload) where state.turnSkills.insert(skill.name).inserted {
+                state.pendingSkills[skill, default: 0] += 1
             }
             return []
         case "turn_context":
@@ -308,10 +331,9 @@ enum AgentLogParser {
     }
 
     /// Skills a response item loads: one the person invoked, which arrives
-    /// wrapped in `<skill>`, or one the model opens by its `SKILL.md`.
-    /// ponytail: a command that only edits a SKILL.md counts too; a turn
+    /// wrapped in `<skill>`, or one the model opens by its `SKILL.md`. A turn
     /// counts each skill once, which absorbs rereads.
-    static func codexSkills(_ payload: [String: Any]) -> [String] {
+    static func codexSkills(_ payload: [String: Any]) -> [AgentSkill] {
         switch payload["type"] as? String {
         case "message":
             guard payload["role"] as? String == "user" else { return [] }
@@ -321,22 +343,29 @@ enum AgentLogParser {
                     guard let open = block.range(of: "<name>"),
                           let close = block.range(of: "</name>", range: open.upperBound..<block.endIndex) else { return nil }
                     return skillName(block[open.upperBound..<close.lowerBound])
+                        .map { AgentSkill(name: $0, byPerson: true) }
                 }
             }
         case "function_call", "custom_tool_call":
+            // A patch writes a skill rather than loading it.
+            guard payload["name"] as? String != "apply_patch" else { return [] }
             let command = payload["arguments"] as? String ?? payload["input"] as? String ?? ""
             return command.components(separatedBy: "/SKILL.md").dropLast().compactMap {
                 $0.split(whereSeparator: { "/\"' ".contains($0) }).last.flatMap { skillName($0) }
+                    .map { AgentSkill(name: $0, byPerson: false) }
             }
         default:
             return []
         }
     }
 
+    /// A skill folder's name, without the plugin it comes from. Anything
+    /// else, like a glob or a shell variable in a path, is not a skill.
     private static func skillName(_ text: Substring) -> String? {
-        let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name.count <= 80, !name.contains(where: \.isWhitespace) else { return nil }
-        return native(name)
+        let name = text.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":").last ?? ""
+        guard !name.isEmpty, name.count <= 80,
+              name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }) else { return nil }
+        return native(String(name))
     }
 
     /// Input counts include what came from the cache.
