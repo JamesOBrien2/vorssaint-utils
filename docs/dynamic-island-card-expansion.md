@@ -84,7 +84,7 @@ The preview uses extracted production AI cards and OCR result markup with the sh
 
 ### Current review status
 
-The app and native component preview build. The focused Dynamic Island suite passes 66,703 checks, including the source-to-reader transition geometry regression; the Agents suite passes 287 checks. The user reviewed the native sample previews and confirmed the revised interaction and motion.
+The app and native component preview build. After integrating current main, the optimized app build and selftest pass; the focused Dynamic Island suite passes 74,151 checks, including the source-to-reader transition geometry regression, and the Agents suite passes 476 checks. Verification ran on Mac14,9 with macOS 26.6.2. The user reviewed the native sample previews in English and confirmed the revised interaction and motion.
 
 Each reader has its own identity inside a stable overlay. A native geometry effect maps the actual reader frame onto its own source in page coordinates for both opening and closing. This avoids scaling around the page centre or carrying another reader’s layout into the transition. The idle presenter passes pointer events through to the cards.
 
