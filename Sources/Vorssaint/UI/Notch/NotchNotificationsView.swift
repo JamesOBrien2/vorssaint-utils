@@ -39,7 +39,9 @@ struct NotchNotificationsView: View {
                     NotchNotificationRow(item: item, service: service, text: text)
                         .frame(height: cardHeight)
                         .notchCardHover()
-                        .notchExpandable(id: "notification.\(item.id)", title: text.title) {
+                        .notchExpandable(id: "notification.\(item.id)", title: text.title,
+                                          surface: NotchControlSurface(cornerRadius: 14, fillOpacity: 0.06),
+                                          header: AnyView(Text(text.title).font(.system(size: 11)).foregroundStyle(.white.opacity(0.6)))) {
                             NotchNotificationExpandedContent(id: item.id, text: text)
                         }
                 }
@@ -108,11 +110,12 @@ private struct NotchNotificationRow: View {
                 Text(message).font(.caption).foregroundStyle(.orange).lineLimit(expanded ? nil : 1)
             }
         }
-        .padding(12)
+        .padding(expanded ? 0 : 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.white.opacity(expanded ? 0 : 0.06), in: RoundedRectangle(cornerRadius: 14))
+        .modifier(NotchControlSurface(cornerRadius: 14, fillOpacity: expanded ? 0 : 0.06))
         .clipped()
         .accessibilityElement(children: .contain)
+        .notchExpansionTap(id: "notification.\(item.id)", enabled: !expanded)
     }
 
     private var message: some View {
@@ -125,7 +128,6 @@ private struct NotchNotificationRow: View {
             }
             if !item.content.body.isEmpty {
                 Text(item.content.body).font(.system(size: 12)).foregroundStyle(.white.opacity(0.8))
-                    .textSelection(.enabled)
                     .frame(maxWidth: .infinity, maxHeight: expanded ? nil : .infinity, alignment: .topLeading)
             }
         }

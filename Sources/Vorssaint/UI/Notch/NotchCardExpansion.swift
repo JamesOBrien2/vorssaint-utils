@@ -24,6 +24,8 @@ private struct NotchExpansionSource {
     let anchor: Anchor<CGRect>
     let title: String
     let preferredSize: CGSize
+    let surface: NotchControlSurface
+    let header: AnyView?
     let content: AnyView
 }
 
@@ -39,6 +41,8 @@ private struct NotchExpandableModifier<Expanded: View>: ViewModifier {
     let id: String
     let title: String
     let preferredSize: CGSize
+    let surface: NotchControlSurface
+    let header: AnyView?
     let expanded: Expanded
     @Environment(\.notchExpansionActions) private var actions
 
@@ -47,7 +51,8 @@ private struct NotchExpandableModifier<Expanded: View>: ViewModifier {
             .anchorPreference(key: NotchExpansionSourcesKey.self, value: .bounds) { anchor in
                 guard actions != nil else { return [:] }
                 return [id: NotchExpansionSource(anchor: anchor, title: title,
-                                                 preferredSize: preferredSize, content: AnyView(expanded))]
+                                                 preferredSize: preferredSize, surface: surface,
+                                                 header: header, content: AnyView(expanded))]
             }
     }
 }
@@ -55,11 +60,35 @@ private struct NotchExpandableModifier<Expanded: View>: ViewModifier {
 extension View {
     func notchExpandable<Expanded: View>(id: String, title: String,
                                          preferredSize: CGSize = CGSize(width: 360, height: 240),
+                                         surface: NotchControlSurface = NotchControlSurface(cornerRadius: 18),
+                                         header: AnyView? = nil,
                                          @ViewBuilder expanded: () -> Expanded) -> some View {
-        modifier(NotchExpandableModifier(id: id, title: title, preferredSize: preferredSize, expanded: expanded()))
+        modifier(NotchExpandableModifier(id: id, title: title, preferredSize: preferredSize,
+                                         surface: surface, header: header, expanded: expanded()))
+    }
+
+    /// Expand an information card; nested buttons keep their own actions.
+    func notchExpansionTap(id: String, enabled: Bool = true) -> some View {
+        modifier(NotchExpansionTap(id: id, enabled: enabled))
     }
 
     func notchCardHover(enabled: Bool = true) -> some View { modifier(NotchCardHover(applies: enabled)) }
+}
+
+private struct NotchExpansionTap: ViewModifier {
+    let id: String
+    var enabled = true
+    @Environment(\.notchExpansionActions) private var actions
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let actions, enabled {
+            content.contentShape(Rectangle())
+                .onTapGesture { actions.open(id) }
+                .accessibilityAction(named: Text(L10n.shared.s.menuShowAll)) { actions.open(id) }
+        } else {
+            content
+        }
+    }
 }
 
 /// An explicit action keeps previewing separate from pasting, opening or deleting.
@@ -122,19 +151,25 @@ struct NotchCardExpansionHost<Content: View>: View {
             .frame(width: size.width, height: size.height, alignment: .top)
             .overlayPreferenceValue(NotchExpansionSourcesKey.self) { sources in
                 GeometryReader { geometry in
-                    if let selectedID, let source = sources[selectedID] {
-                        let card = geometry[source.anchor]
-                        let frame = NotchCardExpansionSupport.frame(card: card, page: size,
-                                                                  preferred: source.preferredSize)
-                        ZStack(alignment: .topLeading) {
+                    ZStack(alignment: .topLeading) {
+                        if let selectedID, let source = sources[selectedID] {
+                            let card = geometry[source.anchor]
+                            let frame = NotchCardExpansionSupport.frame(card: card, page: size,
+                                                                      preferred: source.preferredSize)
                             Color.black.opacity(0.3)
                                 .contentShape(Rectangle())
                                 .onTapGesture(perform: close)
                                 .accessibilityHidden(true)
+                                .transition(.opacity)
+                                .zIndex(0)
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack(spacing: 8) {
-                                    Text(source.title).font(.system(size: 12, weight: .semibold))
-                                        .lineLimit(1)
+                                    if let header = source.header {
+                                        header
+                                    } else {
+                                        Text(source.title).font(.system(size: 12, weight: .semibold))
+                                            .lineLimit(1)
+                                    }
                                     Spacer(minLength: 4)
                                     NotchIconButton(symbol: "xmark", title: l10n.s.menuClose, action: close)
                                         .focused($closeFocused)
@@ -144,30 +179,34 @@ struct NotchCardExpansionHost<Content: View>: View {
                             }
                             .padding(12)
                             .frame(width: frame.width, height: frame.height)
-                            .modifier(NotchControlSurface(cornerRadius: 18, interactive: false, raised: true))
+                            .modifier(source.surface.elevated())
                             .shadow(color: .black.opacity(0.45), radius: 18, y: 8)
                             .position(x: frame.midX, y: frame.midY)
+                            .transition(reduceMotion ? .opacity : .modifier(
+                                active: NotchBubbleOrigin(card: card, expanded: frame, progress: 0),
+                                identity: NotchBubbleOrigin(card: card, expanded: frame, progress: 1))
+                                .combined(with: .opacity))
                             .accessibilityElement(children: .contain)
                             .accessibilityIdentifier("notch.expanded.\(selectedID)")
                             .focusSection()
                             .onExitCommand(perform: close)
                             .onAppear { closeFocused = true }
-                            .transition(reduceMotion ? .opacity : .modifier(
-                                active: NotchBubbleOrigin(scaleX: card.width / max(1, frame.width),
-                                                         scaleY: card.height / max(1, frame.height),
-                                                         x: card.midX - frame.midX, y: card.midY - frame.midY),
-                                identity: NotchBubbleOrigin(scaleX: 1, scaleY: 1, x: 0, y: 0)))
+                            .onChange(of: card.intersects(CGRect(origin: .zero, size: size)), initial: true) { _, visible in
+                                if !visible { close() }
+                            }
+                            .id(selectedID)
+                            .zIndex(1)
                         }
-                        .onChange(of: card.intersects(CGRect(origin: .zero, size: size)), initial: true) { _, visible in
-                            if !visible { close() }
-                        }
+                        Color.clear.allowsHitTesting(false)
+                            .onChange(of: sources.keys.sorted()) { _, ids in
+                                if let selectedID, !ids.contains(selectedID) { close() }
+                            }
                     }
-                    Color.clear.allowsHitTesting(false)
-                        .onChange(of: sources.keys.sorted()) { _, ids in
-                            if let selectedID, !ids.contains(selectedID) { close() }
-                        }
+                    .frame(width: size.width, height: size.height, alignment: .topLeading)
                 }
                 .clipped()
+                // The idle presenter must pass pointer events through to its cards.
+                .allowsHitTesting(selectedID != nil)
             }
             .environment(\.notchExpansionActions,
                          NotchExpansionActions(selectedID: selectedID, open: open, close: close))
@@ -196,13 +235,21 @@ struct NotchCardExpansionHost<Content: View>: View {
     }
 }
 
-private struct NotchBubbleOrigin: ViewModifier {
-    let scaleX: CGFloat
-    let scaleY: CGFloat
-    let x: CGFloat
-    let y: CGFloat
-    func body(content: Content) -> some View {
-        content.scaleEffect(x: scaleX, y: scaleY).offset(x: x, y: y).opacity(scaleX == 1 && scaleY == 1 ? 1 : 0)
+/// The positioned reader occupies a page-sized layout box. Map its actual
+/// bubble frame rather than scaling around the centre of that layout box.
+private struct NotchBubbleOrigin: GeometryEffect {
+    let card: CGRect
+    let expanded: CGRect
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(NotchCardExpansionSupport.transitionTransform(card: card, expanded: expanded,
+                                                                          progress: progress))
     }
 }
 

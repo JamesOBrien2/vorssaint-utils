@@ -116,12 +116,10 @@ struct PanelURLCleanerView: View {
         } else {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .top, spacing: 6) {
-                    Text(output)
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .lineLimit(3)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Group {
+                        if expansion == nil { outputText.textSelection(.enabled) } else { outputText }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     if expansion != nil {
                         NotchExpandButton(id: "tools.urlResult", title: l10n.s.urlCleanerManualTitle)
                     }
@@ -132,12 +130,15 @@ struct PanelURLCleanerView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .notchExpandable(id: "tools.urlResult", title: l10n.s.urlCleanerManualTitle) {
+            .notchExpansionTap(id: "tools.urlResult")
+            .notchExpandable(id: "tools.urlResult", title: l10n.s.urlCleanerManualTitle,
+                             surface: NotchControlSurface(cornerRadius: 18)) {
                 VStack(alignment: .leading, spacing: 8) {
-                    ClipboardTextPreview(text: output)
+                    ClipboardTextPreview(text: output, font: .monospacedSystemFont(ofSize: 10.5, weight: .regular),
+                                         inset: .zero)
                     HStack {
                         if let message {
-                            Text(message).font(.caption).foregroundStyle(.secondary)
+                            Text(message).font(.system(size: 10)).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 0)
                         Button(l10n.s.urlCleanerCopyButton, action: copy)
@@ -146,6 +147,11 @@ struct PanelURLCleanerView: View {
                 }
             }
         }
+    }
+
+    private var outputText: some View {
+        Text(output).font(.system(size: 10.5, design: .monospaced))
+            .lineLimit(3).truncationMode(.middle)
     }
 
     /// Through the shared lane: a direct read here would both race the

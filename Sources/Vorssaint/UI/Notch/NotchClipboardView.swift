@@ -173,7 +173,8 @@ struct NotchClipboardView: View {
         }
         .clipped()
         .notchCardHover()
-        .notchExpandable(id: "clipboard.\(entry.id)", title: text.previewLabel) {
+        .notchExpandable(id: "clipboard.\(entry.id)", title: text.previewLabel,
+                         surface: NotchControlSurface(cornerRadius: 14, selected: entry.isPinned)) {
             NotchClipboardReader(id: entry.id, text: text)
         }
         .contextMenu { actions(entry) }

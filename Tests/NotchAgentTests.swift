@@ -1087,7 +1087,7 @@ enum NotchAgentTests {
                         && NotchAgentSupport.hiddenCount(total: 3, visible: 3) == 0
                         && NotchAgentSupport.hiddenCount(total: 5, visible: 3) == 2
                         && NotchAgentSupport.hiddenCount(total: 0, visible: 3) == 0,
-                     "Now, Models and Projects offer expansion only when compact rows omit content")
+                     "Now, Models and Projects count only the omitted rows in their +N badge")
         let geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1512, height: 982), safeAreaTop: 32,
                                      cameraWidth: 185, layout: .spacious, compactSideRoom: 200)
         suite.expect(geometry.expandedSize(module: .agents, agentsHeight: 96).height

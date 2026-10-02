@@ -781,6 +781,29 @@ enum NotchTests {
             suite.expect(frame.minX >= 0 && frame.minY >= 0 && frame.maxX <= size.width && frame.maxY <= size.height,
                          "expanded cards stay inside the visible page even with a scrolled source or long content")
         }
+        // Visit opposite corners in succession, with different reader sizes.
+        let page = CGSize(width: 520, height: 270)
+        for card in [CGRect(x: 264, y: 0, width: 256, height: 128),
+                     CGRect(x: 0, y: 136, width: 256, height: 128),
+                     CGRect(x: 264, y: 136, width: 256, height: 128)] {
+            for preferred in [CGSize(width: 360, height: 216), CGSize(width: 360, height: 240)] {
+                let expanded = NotchCardExpansionSupport.frame(card: card, page: page, preferred: preferred)
+                func at(_ progress: CGFloat) -> CGRect {
+                    expanded.applying(NotchCardExpansionSupport.transitionTransform(card: card, expanded: expanded,
+                                                                                    progress: progress))
+                }
+                func matches(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+                    abs(lhs.minX - rhs.minX) < 0.001 && abs(lhs.minY - rhs.minY) < 0.001
+                        && abs(lhs.width - rhs.width) < 0.001 && abs(lhs.height - rhs.height) < 0.001
+                }
+                let middle = at(0.5)
+                suite.expect(matches(at(0), card) && matches(at(1), expanded)
+                             && abs(middle.midX - (card.midX + expanded.midX) / 2) < 0.001
+                             && abs(middle.midY - (card.midY + expanded.midY) / 2) < 0.001
+                             && middle.width > card.width && middle.width < expanded.width,
+                             "each expansion transforms its reader onto its own bubble before growing, without a page-centre shift")
+            }
+        }
         suite.expect(NotchCardExpansionSupport.hoverScale(enabled: true, hovered: true, reduceMotion: false) > 1
                      && NotchCardExpansionSupport.hoverScale(enabled: false, hovered: true, reduceMotion: false) == 1
                      && NotchCardExpansionSupport.hoverScale(enabled: true, hovered: true, reduceMotion: true) == 1,
