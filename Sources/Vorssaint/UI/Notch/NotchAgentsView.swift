@@ -211,13 +211,7 @@ private struct NotchAgentLimitsCard: View {
         return [session, longer].compactMap { $0 }
     }
 
-    @ViewBuilder var body: some View {
-        if limits?.windows.isEmpty == false {
-            expandableCard
-        } else {
-            baseCard
-        }
-    }
+    var body: some View { baseCard }
 
     private var baseCard: some View {
         let windows = windows
@@ -271,29 +265,6 @@ private struct NotchAgentLimitsCard: View {
             }
         }
         .accessibilityElement(children: .combine)
-    }
-
-    private var expandableCard: some View {
-        baseCard
-        .notchExpansionTap(id: "agent.limits.\(account?.name ?? provider.rawValue)")
-        .notchExpandable(id: "agent.limits.\(account?.name ?? provider.rawValue)",
-                         title: account.map { provider.displayName + " · " + $0.name } ?? provider.displayName,
-                         preferredSize: CGSize(width: 360, height: 240)) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach((limits?.windows ?? []).map { AgentLimitSupport.current($0, at: now) }) {
-                        row($0)
-                    }
-                    if let observed = limits?.observedAt {
-                        Text(text.updated(observed.formatted(.relative(presentation: .named,
-                                                                        unitsStyle: .abbreviated).locale(locale)))
-                        )
-                            .font(.system(size: 9.5))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
     }
 
     private func meters(_ windows: [AgentLimitWindow]) -> some View {
@@ -616,18 +587,11 @@ private struct NotchAgentLiveCard: View {
                             Text(text.idle).foregroundStyle(.secondary)
                         } else {
                             ForEach(live) { session in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(session.project.isEmpty ? session.provider.displayName : session.project)
-                                        .font(.system(size: 12, weight: .semibold))
-                                    Text([session.provider.displayName, AgentPricing.displayName(session.model),
-                                          text.tokens(AgentFormat.tokens(session.tokens.total)),
-                                          AgentFormat.cost(session.cost)].joined(separator: " · "))
-                                        .font(.system(size: 10)).foregroundStyle(.secondary)
-                                    NotchAgentExpandedTotals(title: text.tokens(AgentFormat.tokens(session.tokens.total)),
-                                                             totals: AgentTotals(tokens: session.tokens, cost: session.cost),
-                                                             byCost: true, text: text, tint: session.provider.tint)
-                                }
-                                .padding(.bottom, 4)
+                                NotchAgentExpandedTotals(
+                                    title: (session.project.isEmpty ? session.provider.displayName : session.project)
+                                        + " · " + AgentPricing.displayName(session.model),
+                                    totals: AgentTotals(tokens: session.tokens, cost: session.cost),
+                                    byCost: true, text: text, tint: session.provider.tint)
                             }
                         }
                     }
@@ -723,9 +687,10 @@ private struct NotchAgentTrendCard: View {
         .notchExpansionTap(id: "agent.trend")
         .notchExpandable(id: "agent.trend", title: text.trendCard, preferredSize: CGSize(width: 420, height: 320)) {
             NotchAgentExpandedScroll {
+                let peak = buckets.map { $0.total.cost }.max() ?? 0
                 ForEach(buckets) { bucket in
-                    NotchAgentExpandedTotals(title: label(bucket.start, long: true),
-                                             totals: bucket.total, byCost: byCost, text: text)
+                    NotchAgentExpandedBucket(title: label(bucket.start, long: true),
+                                             totals: bucket.total, peak: peak)
                 }
             }
         }
