@@ -19,7 +19,8 @@ let package = Package(
         .executableTarget(
             name: "Vorssaint",
             dependencies: ["VMStatisticsCompat", "HIDEventSystem"],
-            path: "Sources/Vorssaint"
+            path: "Sources/Vorssaint",
+            linkerSettings: [.linkedLibrary("sqlite3")]
         )
     ]
 )

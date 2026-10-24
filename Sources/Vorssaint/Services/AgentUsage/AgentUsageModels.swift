@@ -6,7 +6,7 @@ import Foundation
 /// The coding agents whose session logs the island reads. Their names are
 /// product names and stay untranslated.
 enum AgentProvider: String, CaseIterable, Identifiable, Codable {
-    case claude, codex
+    case claude, codex, opencode
 
     var id: String { rawValue }
 
@@ -14,6 +14,7 @@ enum AgentProvider: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .claude: return "Claude"
         case .codex: return "Codex"
+        case .opencode: return "OpenCode"
         }
     }
 
@@ -21,6 +22,7 @@ enum AgentProvider: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .claude: return "sparkle"
         case .codex: return "chevron.left.forwardslash.chevron.right"
+        case .opencode: return "terminal"
         }
     }
 }
@@ -74,7 +76,7 @@ struct AgentUsageRecord: Equatable {
 /// A usage allowance and how much of it is spent, as the provider reports it.
 struct AgentLimitWindow: Equatable, Identifiable {
     enum Kind: String {
-        case session, weekly, other
+        case session, daily, weekly, other
     }
 
     let id: String
@@ -85,6 +87,9 @@ struct AgentLimitWindow: Equatable, Identifiable {
     let scope: String?
     let usedPercent: Double
     let resetsAt: Date?
+    /// Requests this Mac counted itself. OpenCode does not publish the
+    /// allowance behind them, so the card shows the count alone.
+    var requests: Int? = nil
 
     var usedFraction: Double { min(1, max(0, usedPercent / 100)) }
     var remainingFraction: Double { 1 - usedFraction }
@@ -98,6 +103,8 @@ struct AgentLimits: Equatable {
         case sessionLog
         /// Asked of the agent on request, which checks the account itself.
         case account
+        /// Counted from a local database rather than reported by the provider.
+        case local
     }
 
     let provider: AgentProvider

@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vorssaint
 
 import Foundation
+import SQLite3
 
 enum NotchAgentTests {
     static func run(_ suite: TestSuite) {
@@ -26,6 +27,7 @@ enum NotchAgentTests {
         AgentUsageReadTests.run(suite)
         claudeApp(suite)
         AgentCodexResetTests.run(suite)
+        openCode(suite)
         preferences(suite)
         formatting(suite)
         AgentUsageEventDeliveryTests.run(suite)
@@ -988,6 +990,82 @@ enum NotchAgentTests {
                      "the settings read when the Claude app last checked, straight from its file")
     }
 
+    // MARK: OpenCode
+
+    /// The reader counts what OpenCode wrote, and nothing else, for the UTC
+    /// day its free allowance covers.
+    private static func openCode(_ suite: TestSuite) {
+        let home = FileManager.default.temporaryDirectory.appending(path: "vorssaint-opencode-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let database = home.appending(path: ".local/share/opencode/opencode.db")
+        let catalogue = home.appending(path: ".cache/opencode/models.json")
+        try? FileManager.default.createDirectory(at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: catalogue.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+        suite.expect(!AgentOpenCodeUsage.isInstalled(home: home, environment: [:])
+                        && AgentOpenCodeUsage.daily(home: home, environment: [:]) == nil,
+                     "without a database there is no OpenCode reading")
+        try? """
+        {"opencode":{"models":{"free-a":{"cost":{"input":0,"output":0}},
+        "paid-b":{"cost":{"input":1,"output":2}}}}}
+        """.write(to: catalogue, atomically: true, encoding: .utf8)
+
+        let now = AgentTimestamp.parse("2026-09-22T12:00:00Z")!
+        let (start, end) = AgentOpenCodeUsage.utcDay(containing: now)
+        suite.expect(start == AgentTimestamp.parse("2026-09-22T00:00:00Z")
+                        && end == AgentTimestamp.parse("2026-09-23T00:00:00Z"),
+                     "OpenCode's day starts and ends at midnight UTC")
+
+        var handle: OpaquePointer?
+        guard sqlite3_open(database.path, &handle) == SQLITE_OK, let handle else {
+            suite.expect(false, "the test database opens")
+            return
+        }
+        defer { sqlite3_close(handle) }
+        sqlite3_exec(handle, """
+            CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER,
+                                  data TEXT);
+            """, nil, nil, nil)
+        func insert(_ id: String, _ date: Date, role: String = "assistant", provider: String = "opencode",
+                    model: String = "free-a") {
+            let data = "{\"role\":\"\(role)\",\"providerID\":\"\(provider)\",\"modelID\":\"\(model)\"}"
+            let ms = Int64(date.timeIntervalSince1970 * 1000)
+            var statement: OpaquePointer?
+            sqlite3_prepare_v2(handle,
+                               "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)",
+                               -1, &statement, nil)
+            guard let statement else { return }
+            defer { sqlite3_finalize(statement) }
+            let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+            sqlite3_bind_text(statement, 1, id, -1, transient)
+            sqlite3_bind_text(statement, 2, "s", -1, transient)
+            sqlite3_bind_int64(statement, 3, ms)
+            sqlite3_bind_int64(statement, 4, ms)
+            sqlite3_bind_text(statement, 5, data, -1, transient)
+            sqlite3_step(statement)
+        }
+        insert("a", AgentTimestamp.parse("2026-09-22T08:00:00Z")!)
+        insert("b", AgentTimestamp.parse("2026-09-22T09:00:00Z")!, model: "suffix-free")
+        insert("c", AgentTimestamp.parse("2026-09-22T10:00:00Z")!, model: "paid-b")
+        insert("d", AgentTimestamp.parse("2026-09-22T11:00:00Z")!, role: "user")
+        insert("e", AgentTimestamp.parse("2026-09-22T11:00:00Z")!, provider: "other")
+        insert("f", AgentTimestamp.parse("2026-09-21T23:00:00Z")!)
+        insert("g", AgentTimestamp.parse("2026-09-23T00:00:00Z")!)
+
+        let reading = AgentOpenCodeUsage.daily(home: home, now: now, environment: [:])
+        suite.expect(reading == AgentOpenCodeUsage.Daily(used: 2, resetsAt: end),
+                     "only this UTC day's free assistant requests count")
+        let limits = reading?.limits(observedAt: now)
+        let window = limits?.windows.first
+        suite.expect(limits?.source == .local && limits?.provider == .opencode
+                        && window?.kind == .daily && window?.minutes == AgentOpenCodeUsage.windowMinutes
+                        && window?.requests == 2 && window?.usedFraction == 0,
+                     "the reading is a local request count, not a reported percentage")
+        let renewed = window.map { AgentLimitSupport.current($0, at: end) }
+        suite.expect(renewed?.requests == 0 && renewed?.usedPercent == 0,
+                     "a new UTC day starts the count over")
+    }
+
     // MARK: Preferences and layout
 
     private static func preferences(_ suite: TestSuite) {
@@ -1025,7 +1103,10 @@ enum NotchAgentTests {
         suite.expect(NotchAgentSupport.cards(in: defaults) == [.trend, .spend, .limits, .live, .models, .resets],
                      "the saved order ignores unknown and repeated cards and appends new ones")
         defaults.set(false, forKey: DefaultsKey.notchAgentsCodex)
-        suite.expect(NotchAgentSupport.providers(in: defaults) == [.claude], "an agent can be left out")
+        suite.expect(NotchAgentSupport.providers(in: defaults) == [.claude, .opencode],
+                     "an agent can be left out while the others stay")
+        defaults.set(false, forKey: DefaultsKey.notchAgentsOpenCode)
+        suite.expect(NotchAgentSupport.providers(in: defaults) == [.claude], "every agent can be left out")
         defaults.set(false, forKey: DefaultsKey.notchAgentsFinishAlert)
         defaults.set(95.0, forKey: DefaultsKey.notchAgentsLimitThreshold)
         defaults.set(-4.0, forKey: DefaultsKey.notchAgentsDailyBudget)
@@ -1034,6 +1115,7 @@ enum NotchAgentTests {
                      "alerts follow their switches and a budget must be positive")
 
         let keys = [DefaultsKey.notchAgentsEnabled, DefaultsKey.notchAgentsClaude, DefaultsKey.notchAgentsCodex,
+                    DefaultsKey.notchAgentsOpenCode,
                     DefaultsKey.notchAgentsCardOrder, DefaultsKey.notchAgentsHiddenCards, DefaultsKey.notchAgentsPeriod,
                     DefaultsKey.notchAgentsLimitDisplay, DefaultsKey.notchAgentsLiveActivity, DefaultsKey.notchAgentsReadout,
                     DefaultsKey.notchAgentsFinishAlert, DefaultsKey.notchAgentsFinishMinimum, DefaultsKey.notchAgentsLimitAlert,

@@ -14,13 +14,15 @@ struct NotchAgentsView: View {
     @AppStorage(DefaultsKey.notchAgentsHiddenCards) private var hiddenCards = ""
     @AppStorage(DefaultsKey.notchAgentsClaude) private var claude = true
     @AppStorage(DefaultsKey.notchAgentsCodex) private var codex = true
+    @AppStorage(DefaultsKey.notchAgentsOpenCode) private var opencode = true
 
     private var text: NotchAgentStrings { FeatureStrings.notchAgents(l10n.language) }
     private var chosenPeriod: AgentPeriod { AgentPeriod(rawValue: period) ?? .today }
 
     /// Only agents that left something on this Mac get cards.
     private var providers: [AgentProvider] {
-        [claude ? AgentProvider.claude : nil, codex ? .codex : nil].compactMap { $0 }
+        [claude ? AgentProvider.claude : nil, codex ? .codex : nil, opencode ? .opencode : nil]
+            .compactMap { $0 }
             .filter(usage.snapshot.seen.contains)
     }
 
@@ -110,6 +112,7 @@ private struct NotchAgentChip: View {
             .font(.system(size: 9, weight: .semibold))
             .foregroundStyle(tint.opacity(0.9))
             .lineLimit(1)
+            .minimumScaleFactor(0.75)
             .padding(.horizontal, 5)
             .padding(.vertical, 1.5)
             .background(tint.opacity(0.14), in: Capsule(style: .continuous))
@@ -148,6 +151,7 @@ private struct NotchAgentLimitsCard: View {
                 NotchAgentCardHeader(title: provider.displayName, symbol: provider.symbol, tint: provider.tint,
                                      provider: provider) {
                     HStack(spacing: 4) {
+                        if provider == .opencode { NotchAgentChip(text: text.freeModels, tint: provider.tint) }
                         if let plan = snapshot.plans[provider] { NotchAgentChip(text: plan.name, tint: provider.tint) }
                         if !snapshot.working(provider).isEmpty { NotchAgentPulse(tint: provider.tint, size: 5) }
                     }
@@ -167,8 +171,10 @@ private struct NotchAgentLimitsCard: View {
     }
 
     /// How old a reading is, once it is old enough to have missed use elsewhere.
+    /// A local count is read here, so only its source clock matters.
     @ViewBuilder private var caption: some View {
-        if let observed = snapshot.limits[provider]?.observedAt, now.timeIntervalSince(observed) > 600 {
+        if snapshot.limits[provider]?.source != .local,
+           let observed = snapshot.limits[provider]?.observedAt, now.timeIntervalSince(observed) > 600 {
             Text(text.updated(observed.formatted(.relative(presentation: .named, unitsStyle: .abbreviated)
                 .locale(locale))))
                 .font(.system(size: 9.5))
@@ -178,8 +184,17 @@ private struct NotchAgentLimitsCard: View {
     }
 
     /// A usage-based forecast would read as a promise, so a row says only
-    /// what is spent and when the window renews.
-    private func row(_ window: AgentLimitWindow) -> some View {
+    /// what is spent and when the window renews. A locally counted source has
+    /// no published allowance, so it reads as a plain request count.
+    @ViewBuilder private func row(_ window: AgentLimitWindow) -> some View {
+        if let requests = window.requests {
+            requestsRow(window, requests: requests)
+        } else {
+            percentRow(window)
+        }
+    }
+
+    private func percentRow(_ window: AgentLimitWindow) -> some View {
         let pace = AgentLimitSupport.pace(for: window, now: now)
         let tint = agentLimitTint(provider, usedFraction: window.usedFraction)
         let remaining = display == .remaining
@@ -191,16 +206,9 @@ private struct NotchAgentLimitsCard: View {
                     .foregroundStyle(.white.opacity(0.85))
                     .lineLimit(1)
                     .layoutPriority(1)
-                Group {
-                    if let resets = window.resetsAt {
-                        Label(countdown(to: resets), systemImage: "arrow.clockwise")
-                            .labelStyle(NotchAgentInlineLabel())
-                            .foregroundStyle(.secondary)
-                    }
+                if let resets = window.resetsAt {
+                    resetLabel(resets)
                 }
-                .font(.system(size: 9.5))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
                 Spacer(minLength: 2)
                 Text(AgentFormat.percent(fraction))
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -214,10 +222,41 @@ private struct NotchAgentLimitsCard: View {
         .help(help(window))
     }
 
+    private func requestsRow(_ window: AgentLimitWindow, requests: Int) -> some View {
+        HStack(spacing: 5) {
+            Text(label(window))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.85))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .layoutPriority(1)
+            if let resets = window.resetsAt {
+                resetLabel(resets)
+            }
+            Spacer(minLength: 2)
+            Text(requests.formatted(.number.locale(locale)))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .contentTransition(.numericText())
+        }
+        .help(help(window, requests: requests))
+    }
+
+    private func resetLabel(_ date: Date) -> some View {
+        Label(countdown(to: date), systemImage: "arrow.clockwise")
+            .labelStyle(NotchAgentInlineLabel())
+            .font(.system(size: 9.5))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+    }
+
     /// What the window covers: its length, or the model it is kept for.
     private func label(_ window: AgentLimitWindow) -> String {
         switch window.kind {
         case .session: return text.session
+        case .daily: return text.requestsPerDay
         case .weekly: return window.scope.map { "\(text.weekly) · \($0)" } ?? text.weekly
         case .other:
             guard let minutes = window.minutes else { return window.scope ?? text.readoutLimit }
@@ -233,13 +272,19 @@ private struct NotchAgentLimitsCard: View {
         return AgentFormat.duration(max(60, seconds), locale: locale, units: seconds >= 3600 ? 2 : 1)
     }
 
-    private func help(_ window: AgentLimitWindow) -> String {
-        var parts = [label(window), text.usedShare(AgentFormat.percent(window.usedFraction)),
+    private func help(_ window: AgentLimitWindow, requests: Int? = nil) -> String {
+        var parts: [String]
+        if let requests {
+            parts = [label(window), requests.formatted(.number.locale(locale)), text.estimated]
+        } else {
+            parts = [label(window), text.usedShare(AgentFormat.percent(window.usedFraction)),
                      text.left(AgentFormat.percent(window.remainingFraction))]
+        }
         if let resets = window.resetsAt {
             parts.append(resets.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(locale)))
         }
-        if let observed = snapshot.limits[provider]?.observedAt, now.timeIntervalSince(observed) > 600 {
+        if snapshot.limits[provider]?.source != .local,
+           let observed = snapshot.limits[provider]?.observedAt, now.timeIntervalSince(observed) > 600 {
             parts.append(text.updated(observed.formatted(.relative(presentation: .named).locale(locale))))
         }
         return parts.joined(separator: " · ")

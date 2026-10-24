@@ -124,7 +124,11 @@ struct NotchAgentRestingWing: View {
     @ViewBuilder private func content(now: Date) -> some View {
         let snapshot = usage.snapshot
         let candidates = snapshot.limits.compactMap { provider, limits in
-            AgentLimitSupport.binding(limits, now: now).map { (provider: provider, window: $0) }
+            // A local request count has no published allowance, so it stays
+            // on its own card rather than standing in for a plan limit.
+            AgentLimitSupport.binding(limits, now: now).flatMap { window in
+                window.requests == nil ? (provider: provider, window: window) : nil
+            }
         }
         let focus = candidates.max {
             $0.window.usedPercent != $1.window.usedPercent ? $0.window.usedPercent < $1.window.usedPercent

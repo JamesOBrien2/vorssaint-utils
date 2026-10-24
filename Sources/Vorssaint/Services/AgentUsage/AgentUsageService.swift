@@ -5,10 +5,11 @@ import Combine
 import Foundation
 
 /// Reads Claude Code and Codex usage from their local session logs while the
-/// AI section is on, along with the plan limits the Claude app saves. The
-/// files are read where they are, incrementally, and nothing is copied,
-/// stored or sent: only counters stay in memory. The one request it makes
-/// fetches the public price list, when the person keeps prices up to date.
+/// AI section is on, along with the plan limits the Claude app saves and the
+/// free-model requests OpenCode counts in its own database. The files are read
+/// where they are, incrementally, and nothing is copied, stored or sent: only
+/// counters stay in memory. The one request it makes fetches the public price
+/// list, when the person keeps prices up to date.
 ///
 /// Reading happens on a private queue; the main thread and that queue only
 /// ever hand work to each other asynchronously.
@@ -76,6 +77,8 @@ final class AgentUsageService: ObservableObject {
     private var claudeProfileModified: Date?
     private var claudeAppModified: Date?
     private var claudeAppSamples: [AgentClaudeAppUsage.Sample] = []
+    /// The last free-request count read from OpenCode's database.
+    private var openCodeReading: AgentOpenCodeUsage.Daily?
     private var shippedPrices: AgentPriceList?
     private var previousLimits: [AgentProvider: AgentLimits] = [:]
     /// Warned windows, each waiting for its renewal.
@@ -126,6 +129,7 @@ final class AgentUsageService: ObservableObject {
             guard readerSession >= 0 else { return }
             watch(AgentLogRoot.all(home: home).filter { enabled.contains($0.provider) })
             filesChanged([], rescan: true)
+            readOpenCode(now: Date())
             startPolling()
             // Time went by meanwhile: a window or the day may have moved on.
             schedulePublish()
@@ -164,6 +168,7 @@ final class AgentUsageService: ObservableObject {
             claudeProfileModified = nil
             claudeAppModified = nil
             claudeAppSamples = []
+            openCodeReading = nil
         }
     }
 
@@ -185,6 +190,7 @@ final class AgentUsageService: ObservableObject {
         queue.async { [self] in
             guard readerSession >= 0 else { return }
             readClaudeApp(now: Date())
+            readOpenCode(now: Date())
             checkLimits()
             publish()
         }
@@ -223,6 +229,7 @@ final class AgentUsageService: ObservableObject {
             // The account Claude Code uses picks the Claude app's readings.
             readClaudePlan()
             readClaudeApp(now: now)
+            readOpenCode(now: now)
             store.reportsTransitions = true
             previousLimits = store.limits
             // A budget already passed before launch is history, not news.
@@ -304,6 +311,7 @@ final class AgentUsageService: ObservableObject {
             switch provider {
             case .claude: entries = AgentLogParser.parseClaude(line, state: &cursor.state, now: now)
             case .codex: entries = AgentLogParser.parseCodex(line, state: &cursor.state, now: now)
+            case .opencode: entries = []
             }
             guard !entries.isEmpty else { return }
             changed = true
@@ -382,6 +390,7 @@ final class AgentUsageService: ObservableObject {
                 readClaudePlan()
             }
             readClaudeApp(now: now)
+            readOpenCode(now: now)
             checkLimits()
             reportRenewals(now: now)
             // Publish only when stored values or sliding time windows change.
@@ -543,6 +552,30 @@ final class AgentUsageService: ObservableObject {
         } else if store.limits[.claude]?.source == .claudeApp {
             store.clearLimits(.claude)
         }
+    }
+
+    /// Counts OpenCode's free-model requests from its local database. Only a
+    /// reading that changed is published, so a quiet day costs no redraws.
+    private func readOpenCode(now: Date) {
+        guard enabled.contains(.opencode) else {
+            if store.limits[.opencode]?.source == .local { store.clearLimits(.opencode) }
+            openCodeReading = nil
+            return
+        }
+        guard AgentOpenCodeUsage.isInstalled(home: home) else {
+            if store.limits[.opencode]?.source == .local { store.clearLimits(.opencode) }
+            openCodeReading = nil
+            return
+        }
+        // A database being written can be busy; the last reading stays until
+        // the next call rather than the card disappearing.
+        guard let reading = AgentOpenCodeUsage.daily(home: home, now: now) else { return }
+        if let known = openCodeReading, known.used == reading.used, known.resetsAt == reading.resetsAt,
+           store.limits[.opencode]?.source == .local {
+            return
+        }
+        openCodeReading = reading
+        store.setLimits(reading.limits(observedAt: now))
     }
 
     // MARK: Prices

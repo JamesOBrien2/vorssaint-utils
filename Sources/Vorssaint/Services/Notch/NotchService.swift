@@ -3110,6 +3110,7 @@ final class NotchService: ObservableObject {
         func window(_ window: AgentLimitWindow) -> String {
             switch window.kind {
             case .session: return text.session
+            case .daily: return text.requestsPerDay
             case .weekly: return window.scope.map { "\(text.weekly) · \($0)" } ?? text.weekly
             case .other: return window.minutes.map { AgentFormat.duration(TimeInterval($0) * 60, locale: locale, units: 1) }
                 ?? text.readoutLimit
@@ -3122,10 +3123,15 @@ final class NotchService: ObservableObject {
                                 .filter { !$0.isEmpty }.joined(separator: " · "),
                              symbol: provider.symbol, agent: provider))
         case .limitWarning(let provider, let limit):
-            let share = AgentFormat.percent(remaining ? limit.remainingFraction : limit.usedFraction)
+            let detail: String
+            if let requests = limit.requests {
+                detail = requests.formatted(.number.locale(locale))
+            } else {
+                let share = AgentFormat.percent(remaining ? limit.remainingFraction : limit.usedFraction)
+                detail = remaining ? text.left(share) : text.usedShare(share)
+            }
             show(NotchNotice(event: .agents, title: "\(provider.displayName) · \(window(limit))",
-                             detail: remaining ? text.left(share) : text.usedShare(share),
-                             symbol: "exclamationmark.triangle.fill", agent: provider))
+                             detail: detail, symbol: "exclamationmark.triangle.fill", agent: provider))
         case .limitReset(let provider, let limit):
             show(NotchNotice(event: .agents, title: "\(provider.displayName) · \(window(limit))",
                              detail: text.limitRenewed, symbol: "arrow.clockwise", agent: provider))

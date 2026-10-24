@@ -284,6 +284,7 @@ if (( TEST )); then
         Sources/Vorssaint/Services/AgentUsage/AgentUsageStore.swift
         Sources/Vorssaint/Services/AgentUsage/AgentClaudeAppUsage.swift
         Sources/Vorssaint/Services/AgentUsage/AgentCodexServer.swift
+        Sources/Vorssaint/Services/AgentUsage/AgentOpenCodeUsage.swift
         Sources/Vorssaint/Services/Notch/NotchGestureSupport.swift
         Sources/Vorssaint/Services/Notch/NotchSectionPaging.swift
         Sources/Vorssaint/Services/Notch/NotchSliderEditing.swift
@@ -535,7 +536,7 @@ if (( TEST )); then
     swiftc -Onone -incremental -enable-batch-mode -j "$(sysctl -n hw.logicalcpu)" \
         -module-name VorssaintTests -output-file-map "$TEST_OUTPUT_FILE_MAP" \
         -target "$TARGET" -sdk "$SDK" "${SDK_COMPAT_FLAGS[@]}" \
-        "${VM_STATISTICS_COMPAT_FLAGS[@]}" "${TEST_SOURCES[@]}" -o build/metrics-tests
+        "${VM_STATISTICS_COMPAT_FLAGS[@]}" "${TEST_SOURCES[@]}" -lsqlite3 -o build/metrics-tests
     test_status=0
     ./build/metrics-tests "${TEST_ARGS[@]}" || test_status=$?
     if (( ${#TEST_ARGS} == 0 )); then
@@ -566,7 +567,7 @@ swiftc "${APP_OPTIMIZATION_FLAGS[@]}" -incremental -enable-batch-mode -j "$(sysc
     -output-file-map "$APP_OUTPUT_FILE_MAP" \
     -target "$TARGET" -sdk "$SDK" "${SDK_COMPAT_FLAGS[@]}" "${VM_STATISTICS_COMPAT_FLAGS[@]}" "${HID_EVENT_SYSTEM_FLAGS[@]}" \
     "${BUILD_VARIANT_FLAGS[@]}" \
-    "${APP_SOURCES[@]}" -o "build/$EXECUTABLE"
+    "${APP_SOURCES[@]}" -lsqlite3 -o "build/$EXECUTABLE"
 
 echo "▸ Compiling protected fan helper…"
 swiftc -O -target "$TARGET" -sdk "$SDK" "${SDK_COMPAT_FLAGS[@]}" "${BUILD_VARIANT_FLAGS[@]}" \
