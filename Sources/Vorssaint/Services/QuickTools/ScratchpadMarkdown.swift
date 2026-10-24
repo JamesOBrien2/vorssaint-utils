@@ -174,18 +174,16 @@ struct ScratchpadMarkdown {
     }
 
     static func suggestedTitle(in source: String) -> String? {
-        for line in source.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("#") else { continue }
-            let heading = trimmed.drop { $0 == "#" }
-            guard heading.first == " " else { continue }
-            let content = heading.drop(while: { $0 == " " })
-            let parsed = try? AttributedString(markdown: String(content))
-            let name = ScratchpadSupport.sanitizedPadName(
-                parsed.map { String($0.characters) } ?? String(content))
-            if !name.isEmpty { return name }
+        var title: String?
+        source.enumerateSubstrings(in: source.startIndex..<source.endIndex, options: .byLines) { line, _, _, stop in
+            guard let line, !line.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+            let task = Self(line).tasks.first
+            let content = task.map { (line as NSString).substring(from: $0.content.location) } ?? line
+            let parsed = try? AttributedString(markdown: content)
+            let name = ScratchpadSupport.sanitizedPadName(parsed.map { String($0.characters) } ?? content)
+            if !name.isEmpty { title = name; stop = true }
         }
-        return nil
+        return title
     }
 
     enum ChecklistAction { case uncheckAll, removeCompleted }
@@ -228,21 +226,15 @@ struct ScratchpadMarkdown {
                      replacement: task.checked ? " " : "x", selection: NSRange(location: location, length: 0))
     }
 
-    static func continueList(in source: String, selection: NSRange,
-                             createCheckboxOnNewLine: Bool = false) -> ScratchpadMarkEdit? {
+    static func continueList(in source: String, selection: NSRange) -> ScratchpadMarkEdit? {
         let ns = source as NSString
         guard selection.location <= ns.length, NSMaxRange(selection) <= ns.length,
               !isInsideFence(source, at: selection.location) else { return nil }
         let line = ns.lineRange(for: NSRange(location: selection.location, length: 0))
         let value = ns.substring(with: line).trimmingCharacters(in: .newlines)
-        guard !Self(source).spans.contains(where: { $0.code && NSIntersectionRange($0.range, line).length > 0 }) else { return nil }
         let regex = try! NSRegularExpression(pattern: "^([ \\t]*)([-+*] |[0-9]+[.)] )(\\[[ xX]\\] )?")
-        guard let match = regex.firstMatch(in: value, range: NSRange(location: 0, length: (value as NSString).length)) else {
-            guard createCheckboxOnNewLine, selection.location == line.location + (value as NSString).length else { return nil }
-            let replacement = "\n- [ ] "
-            return .init(range: selection, replacement: replacement,
-                         selection: NSRange(location: selection.location + (replacement as NSString).length, length: 0))
-        }
+        guard let match = regex.firstMatch(in: value, range: NSRange(location: 0, length: (value as NSString).length)),
+              !Self(source).spans.contains(where: { $0.code && NSIntersectionRange($0.range, line).length > 0 }) else { return nil }
         let contentStart = line.location + match.range.length
         guard selection.location >= contentStart else { return nil }
         if (value as NSString).length == match.range.length {

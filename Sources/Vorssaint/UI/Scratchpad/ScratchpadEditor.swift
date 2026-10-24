@@ -16,7 +16,6 @@ struct ScratchpadEditor: NSViewRepresentable {
     var fontSize: CGFloat = 13
     var textColor: NSColor = .labelColor
     var sourceMode = false
-    var createsCheckboxOnNewLine = false
     var position: ScratchpadEditorPosition?
     var onPosition: ((ScratchpadEditorPosition) -> Void)?
     var onCreate: ((NSTextView) -> Void)?
@@ -81,7 +80,6 @@ struct ScratchpadEditor: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let view = scroll.documentView as? TextView else { return }
-        let modeChanged = view.sourceMode != sourceMode
         context.coordinator.parent = self
         view.sourceMode = sourceMode
         let changed = view.string != text
@@ -95,17 +93,7 @@ struct ScratchpadEditor: NSViewRepresentable {
             view.undoManager?.removeAllActions()
             context.coordinator.isUpdating = false
         }
-        if !view.hasMarkedText() {
-            context.coordinator.refresh()
-            if modeChanged {
-                view.layoutManager?.invalidateGlyphs(
-                    forCharacterRange: NSRange(location: 0, length: (view.string as NSString).length),
-                    changeInLength: 0,
-                    actualCharacterRange: nil)
-                view.layoutManager?.ensureLayout(for: view.textContainer!)
-                view.setNeedsDisplay(view.bounds)
-            }
-        }
+        if !view.hasMarkedText() { context.coordinator.refresh() }
     }
 
     static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
@@ -236,7 +224,12 @@ struct ScratchpadEditor: NSViewRepresentable {
                 let callback = parent.onFormattingChange
                 DispatchQueue.main.async { callback?(marks) }
             }
-            let newHidden = parent.sourceMode ? [] : analysis.markers
+            let active = ns.lineRange(for: NSRange(location: min(selection.location, ns.length),
+                                                 length: min(selection.length, max(0, ns.length - selection.location))))
+            let taskMarkers = analysis.tasks.flatMap { [$0.prefix, $0.marker] }
+            let newHidden = parent.sourceMode ? [] : analysis.markers.filter {
+                taskMarkers.contains($0) || NSIntersectionRange($0, active).length == 0
+            }
             if newHidden != hidden || textChanged {
                 hidden = newHidden
                 view.layoutManager?.invalidateGlyphs(forCharacterRange: NSRange(location: 0, length: ns.length), changeInLength: 0, actualCharacterRange: nil)
@@ -320,8 +313,7 @@ struct ScratchpadEditor: NSViewRepresentable {
                       let prefix = prefixes.first(where: { NSMaxRange($0) == selection.location }) else { return false }
                 edit = .init(range: prefix, replacement: "", selection: NSRange(location: prefix.location, length: 0))
             case #selector(NSTextView.insertNewline(_:)):
-                edit = ScratchpadMarkdown.continueList(in: textView.string, selection: textView.selectedRange(),
-                                                       createCheckboxOnNewLine: parent.createsCheckboxOnNewLine)
+                edit = ScratchpadMarkdown.continueList(in: textView.string, selection: textView.selectedRange())
             case #selector(NSTextView.insertTab(_:)), #selector(NSTextView.insertBacktab(_:)):
                 edit = ScratchpadMarkdown.indentList(in: textView.string, selection: textView.selectedRange(),
                                                     outdent: selector == #selector(NSTextView.insertBacktab(_:)))
