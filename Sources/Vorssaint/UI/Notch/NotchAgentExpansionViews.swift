@@ -37,17 +37,10 @@ struct NotchAgentExpandedTotals: View {
                 NotchAgentExpandedLine(label: "Requests", value: "\(totals.requests)")
                 NotchAgentExpandedLine(label: "Tokens", value: AgentFormat.tokens(totals.tokens.total))
             }
-            if totals.tokens.prompt > 0 {
-                HStack(spacing: 5) {
-                    NotchAgentMeter(value: totals.tokens.prompt > 0
-                                    ? Double(totals.tokens.output) / Double(totals.tokens.prompt + totals.tokens.output)
-                                    : 0, tint: tint ?? .white, height: 4)
-                    Text("Output \(AgentFormat.tokens(totals.tokens.output)) · Cache \(AgentFormat.percent(totals.tokens.cacheHitRate ?? 0))")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
+            Text("Input \(AgentFormat.tokens(totals.tokens.prompt)) · Output \(AgentFormat.tokens(totals.tokens.output)) · Cache \(AgentFormat.percent(totals.tokens.cacheHitRate ?? 0))")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
         .padding(10)
         .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -68,23 +61,31 @@ struct NotchAgentExpandedLine: View {
     }
 }
 
-struct NotchAgentExpandedBucket: View {
-    let title: String
-    let totals: AgentTotals
+struct NotchAgentExpandedShareRow: View {
+    let share: AgentShare
+    let byCost: Bool
     let peak: Double
-    let tint: Color = .white
+    let text: NotchAgentStrings
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(title).font(.system(size: 10, weight: .medium)).frame(width: 48, alignment: .leading)
-            NotchAgentMeter(value: totals.weight(byCost: true) / max(peak, .leastNonzeroMagnitude),
-                            tint: tint, height: 5)
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(AgentFormat.cost(totals.cost)).font(.system(size: 10, weight: .semibold, design: .rounded)).monospacedDigit()
-                Text(AgentFormat.tokens(totals.tokens.total)).font(.system(size: 8.5)).foregroundStyle(.secondary).monospacedDigit()
-            }
-            .frame(width: 70, alignment: .trailing)
+            Text(share.name)
+                .font(.system(size: 10.5, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Capsule(style: .continuous)
+                .fill((share.provider?.tint ?? .white).opacity(0.85))
+                .frame(width: max(4, 96 * share.totals.weight(byCost: byCost) / peak), height: 5)
+                .frame(width: 96, alignment: .leading)
+            Text(byCost ? AgentFormat.cost(share.totals.cost) : AgentFormat.tokens(share.totals.tokens.total))
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .monospacedDigit()
+                .frame(width: 54, alignment: .trailing)
         }
-        .padding(.vertical, 4)
+        .padding(9)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .help([share.name, text.tokens(AgentFormat.tokens(share.totals.tokens.total)),
+               AgentFormat.cost(share.totals.cost)].joined(separator: " · "))
     }
 }
