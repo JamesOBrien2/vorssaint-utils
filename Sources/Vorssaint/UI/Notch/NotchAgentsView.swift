@@ -580,22 +580,6 @@ private struct NotchAgentLiveCard: View {
                         if let first = live.first { NotchAgentPulse(tint: first.provider.tint, size: 5) }
                     }
                 }
-                .notchExpansionTap(id: "agent.live")
-                .notchExpandable(id: "agent.live", title: text.liveCard, preferredSize: CGSize(width: 390, height: 300)) {
-                    NotchAgentExpandedScroll {
-                        if live.isEmpty {
-                            Text(text.idle).foregroundStyle(.secondary)
-                        } else {
-                            ForEach(live) { session in
-                                NotchAgentExpandedTotals(
-                                    title: (session.project.isEmpty ? session.provider.displayName : session.project)
-                                        + " · " + AgentPricing.displayName(session.model),
-                                    totals: AgentTotals(tokens: session.tokens, cost: session.cost),
-                                    byCost: true, text: text, tint: session.provider.tint)
-                            }
-                        }
-                    }
-                }
                 if live.isEmpty {
                     VStack(alignment: .leading, spacing: 5) {
                         ForEach(providers) { idleRow($0) }
@@ -605,6 +589,18 @@ private struct NotchAgentLiveCard: View {
                         VStack(alignment: .leading, spacing: 5) {
                             ForEach(live.prefix(2)) { row($0, now: context.date) }
                         }
+                    }
+                }
+            }
+        }
+        .notchExpansionTap(id: "agent.live")
+        .notchExpandable(id: "agent.live", title: text.liveCard, preferredSize: CGSize(width: 390, height: 300)) {
+            NotchAgentExpandedScroll {
+                if live.isEmpty {
+                    Text(text.idle).foregroundStyle(.secondary)
+                } else {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        ForEach(live) { session in row(session, now: context.date) }
                     }
                 }
             }
@@ -686,12 +682,13 @@ private struct NotchAgentTrendCard: View {
         }
         .notchExpansionTap(id: "agent.trend")
         .notchExpandable(id: "agent.trend", title: text.trendCard, preferredSize: CGSize(width: 420, height: 320)) {
-            NotchAgentExpandedScroll {
-                let peak = buckets.map { $0.total.cost }.max() ?? 0
-                ForEach(buckets) { bucket in
-                    NotchAgentExpandedBucket(title: label(bucket.start, long: true),
-                                             totals: bucket.total, peak: peak)
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(caption(byCost: byCost))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                NotchAgentBars(buckets: buckets, providers: providers, byCost: byCost, hovered: $hovered)
+                    .frame(height: 150)
+                axis
             }
         }
     }
@@ -765,9 +762,9 @@ private struct NotchAgentShareCard: View {
         .notchExpansionTap(id: "agent.\(title)")
         .notchExpandable(id: "agent.\(title)", title: title, preferredSize: CGSize(width: 390, height: 300)) {
             NotchAgentExpandedScroll {
+                let peak = max(shares.map { $0.totals.weight(byCost: byCost) }.max() ?? 0, .leastNonzeroMagnitude)
                 ForEach(shares) { share in
-                    NotchAgentExpandedTotals(title: share.name, totals: share.totals,
-                                             byCost: byCost, text: text, tint: share.provider?.tint)
+                    NotchAgentExpandedShareRow(share: share, byCost: byCost, peak: peak, text: text)
                 }
             }
         }
@@ -841,15 +838,21 @@ private struct NotchAgentActivityCard: View {
                     }
                 }
             }
-            .notchExpansionTap(id: "agent.activity")
-            .notchExpandable(id: "agent.activity", title: text.activityCard, preferredSize: CGSize(width: 420, height: 320)) {
-                NotchAgentExpandedScroll {
-                    ForEach(snapshot.days.filter { $0.total.requests > 0 }) { day in
-                        NotchAgentExpandedTotals(title: day.start.formatted(.dateTime.weekday(.wide).day().month(.abbreviated).locale(locale)),
-                                                 totals: day.total, byCost: byCost, text: text)
+        }
+        .notchExpansionTap(id: "agent.activity")
+        .notchExpandable(id: "agent.activity", title: text.activityCard, preferredSize: CGSize(width: 420, height: 320)) {
+            VStack(alignment: .leading, spacing: 8) {
+                GeometryReader { proxy in
+                    let map = NotchAgentHeatmap.width(height: proxy.size.height, days: snapshot.days)
+                    HStack(alignment: .top, spacing: 14) {
+                        NotchAgentHeatmap(days: snapshot.days, byCost: byCost, hovered: $hovered)
+                            .frame(width: map, height: proxy.size.height)
+                        figures(byCost: byCost)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
                 }
             }
+            .frame(height: 190)
         }
     }
 
