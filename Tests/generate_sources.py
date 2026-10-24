@@ -505,8 +505,6 @@ def main():
           + "}\n}\n")
     scratchpad_service = "Sources/Vorssaint/Services/QuickTools/ScratchpadService.swift"
     scratchpad_view = "Sources/Vorssaint/UI/Notch/NotchScratchpadView.swift"
-    write("ScratchpadTitle.swift", "import SwiftUI\n"
-          + declaration("Sources/Vorssaint/UI/Scratchpad/ScratchpadWorkspace.swift", "struct ScratchpadTitleField:"))
     write("NotchCompact.swift", "import AppKit\nimport SwiftUI\nextension NotchCompactTests {\n"
           + declaration("Sources/Vorssaint/UI/Notch/NotchCameraView.swift", "struct NotchCameraView:")
           + declaration("Sources/Vorssaint/UI/Notch/NotchCalendarView.swift", "private struct NotchCalendarEventRow:")
