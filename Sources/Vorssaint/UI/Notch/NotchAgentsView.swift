@@ -211,9 +211,17 @@ private struct NotchAgentLimitsCard: View {
         return [session, longer].compactMap { $0 }
     }
 
-    var body: some View {
+    @ViewBuilder var body: some View {
+        if limits?.windows.isEmpty == false {
+            expandableCard
+        } else {
+            baseCard
+        }
+    }
+
+    private var baseCard: some View {
         let windows = windows
-        NotchAgentCardChrome {
+        return NotchAgentCardChrome {
             VStack(alignment: .leading, spacing: 6) {
                 NotchAgentCardHeader(title: account.map { provider.displayName + " · " + $0.name } ?? provider.displayName,
                                      symbol: provider.symbol, tint: provider.tint, provider: provider) {
@@ -263,6 +271,10 @@ private struct NotchAgentLimitsCard: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private var expandableCard: some View {
+        baseCard
         .notchExpansionTap(id: "agent.limits.\(account?.name ?? provider.rawValue)")
         .notchExpandable(id: "agent.limits.\(account?.name ?? provider.rawValue)",
                          title: account.map { provider.displayName + " · " + $0.name } ?? provider.displayName,
