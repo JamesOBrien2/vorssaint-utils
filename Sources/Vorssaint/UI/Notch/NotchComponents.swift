@@ -688,6 +688,7 @@ struct NotchControlSurface: ViewModifier {
     let cornerRadius: CGFloat
     var selected = false
     var interactive = true
+    var fillOpacity: Double? = nil
     @AppStorage(DefaultsKey.notchLiquidGlassEnabled) private var glass = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
@@ -698,7 +699,7 @@ struct NotchControlSurface: ViewModifier {
         Group {
             if glassSurface {
                 content
-                    .background(.white.opacity(selected ? 0.11 : 0.045), in: shape)
+                    .background(.white.opacity(fillOpacity ?? (selected ? 0.11 : 0.045)), in: shape)
                     .overlay {
                         shape.strokeBorder(.white.opacity(selected ? 0.16 : 0.065), lineWidth: 0.5)
                             .allowsHitTesting(false)
@@ -706,13 +707,13 @@ struct NotchControlSurface: ViewModifier {
             } else {
 #if compiler(>=6.2)
                 if #available(macOS 26, *), glass, !reduceTransparency {
-                    content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
+                    content.background(.white.opacity(fillOpacity ?? (selected ? 0.12 : 0.065)), in: shape)
                         .glassEffect(.regular.interactive(interactive), in: shape)
                 } else {
-                    content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
+                    content.background(.white.opacity(fillOpacity ?? (selected ? 0.12 : 0.065)), in: shape)
                 }
 #else
-                content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
+                content.background(.white.opacity(fillOpacity ?? (selected ? 0.12 : 0.065)), in: shape)
 #endif
             }
         }
