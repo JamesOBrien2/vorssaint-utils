@@ -263,6 +263,25 @@ private struct NotchAgentLimitsCard: View {
             }
         }
         .accessibilityElement(children: .combine)
+        .notchExpansionTap(id: "agent.limits.\(account?.name ?? provider.rawValue)")
+        .notchExpandable(id: "agent.limits.\(account?.name ?? provider.rawValue)",
+                         title: account.map { provider.displayName + " · " + $0.name } ?? provider.displayName,
+                         preferredSize: CGSize(width: 360, height: 240)) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach((limits?.windows ?? []).map { AgentLimitSupport.current($0, at: now) }) {
+                        row($0)
+                    }
+                    if let observed = limits?.observedAt {
+                        Text(text.updated(observed.formatted(.relative(presentation: .named,
+                                                                        unitsStyle: .abbreviated).locale(locale)))
+                        )
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
     }
 
     private func meters(_ windows: [AgentLimitWindow]) -> some View {
