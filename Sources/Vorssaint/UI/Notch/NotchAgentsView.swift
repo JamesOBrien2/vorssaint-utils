@@ -530,6 +530,17 @@ private struct NotchAgentSpendCard: View {
                     .help(text.saved(AgentFormat.cost(usage.total.savings)))
             }
         }
+        .notchExpansionTap(id: "agent.spend")
+        .notchExpandable(id: "agent.spend", title: text.spendCard, preferredSize: CGSize(width: 390, height: 300)) {
+            NotchAgentExpandedScroll {
+                NotchAgentExpandedTotals(title: text.spendCard, totals: usage.total, byCost: usage.fullyPriced, text: text)
+                ForEach(providers) { provider in
+                    if let totals = usage.byProvider[provider] {
+                        NotchAgentExpandedTotals(title: provider.displayName, totals: totals, byCost: usage.fullyPriced, text: text, tint: provider.tint)
+                    }
+                }
+            }
+        }
     }
 
     /// Thirty days of API value against a plan's monthly price.
@@ -596,6 +607,29 @@ private struct NotchAgentLiveCard: View {
                     HStack(spacing: 4) {
                         if live.count > 2 { NotchAgentChip(text: "+\(live.count - 2)") }
                         if let first = live.first { NotchAgentPulse(tint: first.provider.tint, size: 5) }
+                    }
+                }
+                .notchExpansionTap(id: "agent.live")
+                .notchExpandable(id: "agent.live", title: text.liveCard, preferredSize: CGSize(width: 390, height: 300)) {
+                    NotchAgentExpandedScroll {
+                        if live.isEmpty {
+                            Text(text.idle).foregroundStyle(.secondary)
+                        } else {
+                            ForEach(live) { session in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(session.project.isEmpty ? session.provider.displayName : session.project)
+                                        .font(.system(size: 12, weight: .semibold))
+                                    Text([session.provider.displayName, AgentPricing.displayName(session.model),
+                                          text.tokens(AgentFormat.tokens(session.tokens.total)),
+                                          AgentFormat.cost(session.cost)].joined(separator: " · "))
+                                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                                    NotchAgentExpandedTotals(title: text.tokens(AgentFormat.tokens(session.tokens.total)),
+                                                             totals: AgentTotals(tokens: session.tokens, cost: session.cost),
+                                                             byCost: true, text: text, tint: session.provider.tint)
+                                }
+                                .padding(.bottom, 4)
+                            }
+                        }
                     }
                 }
                 if live.isEmpty {
@@ -686,6 +720,15 @@ private struct NotchAgentTrendCard: View {
                 axis
             }
         }
+        .notchExpansionTap(id: "agent.trend")
+        .notchExpandable(id: "agent.trend", title: text.trendCard, preferredSize: CGSize(width: 420, height: 320)) {
+            NotchAgentExpandedScroll {
+                ForEach(buckets) { bucket in
+                    NotchAgentExpandedTotals(title: label(bucket.start, long: true),
+                                             totals: bucket.total, byCost: byCost, text: text)
+                }
+            }
+        }
     }
 
     private func caption(byCost: Bool) -> String {
@@ -751,6 +794,15 @@ private struct NotchAgentShareCard: View {
                     VStack(spacing: 5) {
                         ForEach(shown) { share in row(share, peak: peak) }
                     }
+                }
+            }
+        }
+        .notchExpansionTap(id: "agent.\(title)")
+        .notchExpandable(id: "agent.\(title)", title: title, preferredSize: CGSize(width: 390, height: 300)) {
+            NotchAgentExpandedScroll {
+                ForEach(shares) { share in
+                    NotchAgentExpandedTotals(title: share.name, totals: share.totals,
+                                             byCost: byCost, text: text, tint: share.provider?.tint)
                 }
             }
         }
@@ -821,6 +873,15 @@ private struct NotchAgentActivityCard: View {
                             .frame(width: map, height: proxy.size.height)
                         figures(byCost: byCost)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
+                }
+            }
+            .notchExpansionTap(id: "agent.activity")
+            .notchExpandable(id: "agent.activity", title: text.activityCard, preferredSize: CGSize(width: 420, height: 320)) {
+                NotchAgentExpandedScroll {
+                    ForEach(snapshot.days.filter { $0.total.requests > 0 }) { day in
+                        NotchAgentExpandedTotals(title: day.start.formatted(.dateTime.weekday(.wide).day().month(.abbreviated).locale(locale)),
+                                                 totals: day.total, byCost: byCost, text: text)
                     }
                 }
             }
@@ -898,11 +959,30 @@ private struct NotchAgentResetsCard: View {
                         ProgressView().controlSize(.mini)
                     }
                 }
+
                 if showsDefaultAccount {
                     Text("Codex · " + FeatureStrings.codexAccounts(l10n.language).defaultAccount)
                         .font(.system(size: 8.5)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 content
+            }
+        }
+        .notchExpansionTap(id: "agent.resets")
+        .notchExpandable(id: "agent.resets", title: text.resetsCard, preferredSize: CGSize(width: 360, height: 260)) {
+            NotchAgentExpandedScroll {
+                if let summary = resets.summary {
+                    NotchAgentExpandedLine(label: "Available", value: "\(summary.available)", tint: tint)
+                    if let nextExpiry = summary.nextExpiry {
+                        NotchAgentExpandedLine(label: "Next expiry",
+                                               value: nextExpiry.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(locale)))
+                    } else {
+                        Text("Individual expiry times unavailable").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                } else if let failure = resets.failure {
+                    Text(message(failure)).foregroundStyle(.orange)
+                } else {
+                    Text(text.loading).foregroundStyle(.secondary)
+                }
             }
         }
         .help(text.resetsHelp)
@@ -925,6 +1005,7 @@ private struct NotchAgentResetsCard: View {
                     resets.redeem()
                 }
             }
+
         } else if let finished {
             if finished.outcome == nil, let summary = resets.summary, summary.available > 0 {
                 // Trying again repeats the same use, which never spends a second reset.
