@@ -151,8 +151,14 @@ final class AgentUsageService: ObservableObject {
             let providers = AgentProvider.allCases
             let records = providers.flatMap { provider in
                 (0..<18).map { index in
-                    let model = provider == .codex ? "gpt-5" : "claude-sonnet-4"
-                    let project = ["storefront", "api-refactor", "docs"][index % 3]
+                    let model: String
+                    if provider == .codex {
+                        model = ["gpt-5", "gpt-5-mini", "o3", "o4-mini", "gpt-4.1", "codex-mini"][index % 6]
+                    } else {
+                        model = ["claude-sonnet-4", "claude-opus-4.1", "claude-haiku-3.5",
+                                 "claude-sonnet-3.7", "claude-opus-4", "claude-haiku-4"][index % 6]
+                    }
+                    let project = ["storefront", "api-refactor", "docs", "mobile", "infra", "design"][index % 6]
                     let tokens = AgentTokens(input: 2_000 + index * 300,
                                              cacheRead: 4_000 + index * 500,
                                              output: 700 + index * 40)
@@ -176,7 +182,13 @@ final class AgentUsageService: ObservableObject {
                                  tokens: AgentTokens(input: 24_000, cacheRead: 64_000, output: 4_200), cost: 1.42),
                 AgentLiveSession(id: "demo-codex", provider: .codex, started: now.addingTimeInterval(-340),
                                  lastActivity: now, model: "gpt-5", project: "api-refactor",
-                                 tokens: AgentTokens(input: 14_000, cacheRead: 31_000, output: 2_100), cost: 0.86)
+                                 tokens: AgentTokens(input: 14_000, cacheRead: 31_000, output: 2_100), cost: 0.86),
+                AgentLiveSession(id: "demo-opencode", provider: .opencode, started: now.addingTimeInterval(-185),
+                                 lastActivity: now, model: "qwen3-coder", project: "mobile",
+                                 tokens: AgentTokens(input: 9_000, cacheRead: 18_000, output: 1_600), cost: 0.24),
+                AgentLiveSession(id: "demo-copilot", provider: .copilot, started: now.addingTimeInterval(-95),
+                                 lastActivity: now, model: "gpt-4.1", project: "infra",
+                                 tokens: AgentTokens(input: 6_500, cacheRead: 12_000, output: 900), cost: 0.18)
             ]
             snapshot = AgentUsageSummary.snapshot(records: records, limits: limits, live: live,
                                                    plans: [:], providers: Set(providers), now: now)
