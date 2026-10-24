@@ -114,10 +114,19 @@ final class AgentUsageService: ObservableObject {
     /// always replaces what is on disk, which may hold agents now off.
     private var savedMark: Int?
     private var lastSave = Date.distantPast
+    #if VORSSAINT_DEVELOPMENT
+    private let demoMode = CommandLine.arguments.contains("--demo-agent-cards")
+    #endif
 
     private init() {}
 
     func syncWithPreferences() {
+        #if VORSSAINT_DEVELOPMENT
+        if demoMode {
+            installDemoSnapshot()
+            return
+        }
+        #endif
         CodexProfileLimitsService.shared.synchronize()
         guard NotchAgentSupport.isEnabled() else { stop(); return }
         let wanted = NotchAgentSupport.providers()
@@ -135,6 +144,44 @@ final class AgentUsageService: ObservableObject {
         } else if paused {
             resume()
         }
+
+        #if VORSSAINT_DEVELOPMENT
+        func installDemoSnapshot() {
+            let now = Date()
+            let providers = AgentProvider.allCases
+            let records = providers.flatMap { provider in
+                (0..<18).map { index in
+                    let model = provider == .codex ? "gpt-5" : "claude-sonnet-4"
+                    let project = ["storefront", "api-refactor", "docs"][index % 3]
+                    let tokens = AgentTokens(input: 2_000 + index * 300,
+                                             cacheRead: 4_000 + index * 500,
+                                             output: 700 + index * 40)
+                    return AgentUsageRecord(provider: provider, date: now.addingTimeInterval(TimeInterval(-index * 3600)),
+                                            model: model, project: project, session: "demo-\(provider.rawValue)-\(index)",
+                                            requests: 8 + index, tokens: tokens,
+                                            cost: 0.35 + Double(index) * 0.04, savings: 0.08)
+                }
+            }
+            let limits = Dictionary(uniqueKeysWithValues: providers.filter(\.reportsLimits).map { provider in
+                (provider, AgentLimits(provider: provider, windows: [
+                    AgentLimitWindow(id: "\(provider.rawValue)-session", kind: .session, minutes: 300,
+                                     scope: nil, usedPercent: 38, resetsAt: now.addingTimeInterval(2 * 3600)),
+                    AgentLimitWindow(id: "\(provider.rawValue)-weekly", kind: .weekly, minutes: 10080,
+                                     scope: nil, usedPercent: 62, resetsAt: now.addingTimeInterval(3 * 86_400))
+                ], observedAt: now, source: .account))
+            })
+            let live = [
+                AgentLiveSession(id: "demo-claude", provider: .claude, started: now.addingTimeInterval(-720),
+                                 lastActivity: now, model: "claude-opus-4.1", project: "storefront",
+                                 tokens: AgentTokens(input: 24_000, cacheRead: 64_000, output: 4_200), cost: 1.42),
+                AgentLiveSession(id: "demo-codex", provider: .codex, started: now.addingTimeInterval(-340),
+                                 lastActivity: now, model: "gpt-5", project: "api-refactor",
+                                 tokens: AgentTokens(input: 14_000, cacheRead: 31_000, output: 2_100), cost: 0.86)
+            ]
+            snapshot = AgentUsageSummary.snapshot(records: records, limits: limits, live: live,
+                                                   plans: [:], providers: Set(providers), now: now)
+        }
+        #endif
         syncPrices()
         refreshClaudeLimits()
     }
