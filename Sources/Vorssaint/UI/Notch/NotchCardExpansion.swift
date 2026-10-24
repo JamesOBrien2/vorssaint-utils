@@ -166,7 +166,7 @@ struct NotchCardExpansionHost<Content: View>: View {
                             }
                             .padding(12)
                             .frame(width: frame.width, height: frame.height)
-                            .modifier(source.surface)
+                            .modifier(source.surface.elevated())
                             .shadow(color: .black.opacity(0.45), radius: 18, y: 8)
                             .position(x: frame.midX, y: frame.midY)
                             .transition(reduceMotion ? .opacity : .modifier(
