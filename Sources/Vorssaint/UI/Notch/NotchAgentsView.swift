@@ -588,7 +588,11 @@ private struct NotchAgentLiveCard: View {
                 .notchExpandable(id: "agent.live", title: text.liveCard, preferredSize: CGSize(width: 390, height: 300)) {
                     NotchAgentExpandedScroll {
                         TimelineView(.periodic(from: .now, by: 1)) { context in
-                            ForEach(live) { session in row(session, now: context.date) }
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(live) { session in
+                                    row(session, now: context.date)
+                                }
+                            }
                         }
                     }
                 }
