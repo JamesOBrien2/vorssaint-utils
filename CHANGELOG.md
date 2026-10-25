@@ -12,6 +12,7 @@ More reliable screenshots, audio and Dynamic Island, plus Stage Manager spacing,
 ### Added
 - Window layout can reserve space for Stage Manager when maximizing or arranging windows, including the green-button override. Settings → Window layout → Reserve space for Stage Manager.
 - Switch Spaces by dragging a button now accepts the middle mouse button, including upward drags for Mission Control and downward drags for App Exposé. A short click keeps its normal behavior. Settings → Mouse → Mouse button shortcuts.
+- Scratchpad notes can turn on calculation mode and show answers beside each line, including named values, `prev`, `sum`, `avg`, unit conversions and currency conversions. Calculation mode is off for every note until you turn it on.
 
 ### Changed
 - Command Bar accepts British unit spellings and spaced fluid-ounce names.
