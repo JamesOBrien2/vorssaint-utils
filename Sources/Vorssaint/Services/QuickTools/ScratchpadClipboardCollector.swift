@@ -8,7 +8,8 @@ import Combine
 final class ScratchpadClipboardCollector {
     private let pasteboard: () -> NSPasteboard
     private let access: GeneralPasteboardAccess
-    private let sources = ClipboardIgnoredApps()
+    private let sources: ClipboardIgnoredApps
+    private let defaults: UserDefaults
     private var exclusions: AnyCancellable?
     private var timer: Timer?
     private var capture = ClipboardHistoryCaptureState()
@@ -18,9 +19,12 @@ final class ScratchpadClipboardCollector {
     private var ownUIActive: () -> Bool = { false }
 
     init(pasteboard: @escaping () -> NSPasteboard = { .general },
-         access: GeneralPasteboardAccess = .shared) {
+         access: GeneralPasteboardAccess = .shared,
+         defaults: UserDefaults = .standard) {
         self.pasteboard = pasteboard
         self.access = access
+        self.defaults = defaults
+        self.sources = ClipboardIgnoredApps(defaults: defaults)
     }
 
     func start(ownUIActive: @escaping () -> Bool, receive: @escaping (String) -> Bool) {
@@ -90,7 +94,7 @@ final class ScratchpadClipboardCollector {
             guard !source.excluded, !source.fromHistoryPanel, !ownWrite,
                   let text = result.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   text.count <= ClipboardHistoryEditing.maxCharacters,
-                  !(UserDefaults.standard.bool(forKey: DefaultsKey.clipboardHistoryFilterSensitiveText)
+                  !(self.defaults.bool(forKey: DefaultsKey.clipboardHistoryFilterSensitiveText)
                     && ClipboardHistorySensitiveText.looksSensitive(text)), text != self.lastText else {
                 self.lastChangeCount = result.count
                 return
