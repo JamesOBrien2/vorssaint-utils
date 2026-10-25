@@ -237,12 +237,12 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     private func apply(_ document: ScratchpadDocument, focus: Bool = false) {
+        self.document = document
         if let target = clipboardCollectionTarget,
            target != document.selectedID || !document.openIDs.contains(target)
             || document.pads.first(where: { $0.id == target })?.deletedAt != nil {
             stopClipboardCollection()
         }
-        self.document = document
         publishNotes(document)
         selectedPadID = document.selectedID
         let selectedText = document.pads.first(where: { $0.id == document.selectedID })?.text ?? ""

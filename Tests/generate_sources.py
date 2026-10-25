@@ -1129,6 +1129,12 @@ def main():
           + declaration(notch, "    func showVolume(").replace("    func", "    @discardableResult func", 1)
           + "}\n}\n")
     scratchpad_service = "Sources/Vorssaint/Services/QuickTools/ScratchpadService.swift"
+    write("ScratchpadCollectionLifecycle.swift", "import AppKit\nextension ScratchpadClipboardTests.Service {\n"
+          + "".join(declaration(scratchpad_service, prefix).replace("private func", "func", 1)
+                    for prefix in ["    private func apply(_ document:", "    func selectPad(",
+                                   "    private func changeDocument(", "    private func flushSave()",
+                                   "    private func save(_ next:", "    func stopClipboardCollection()"])
+          + "}\n")
     scratchpad_view = "Sources/Vorssaint/UI/Notch/NotchScratchpadView.swift"
     scratchpad_reading = "Sources/Vorssaint/UI/Scratchpad/ScratchpadView.swift"
     write("NotchCompact.swift", "import AppKit\nimport Carbon.HIToolbox\nimport SwiftUI\nimport UniformTypeIdentifiers\nextension NotchCompactTests {\n"
