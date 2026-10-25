@@ -25,10 +25,13 @@ enum ScratchpadCalculationEvaluator {
                          groupingSeparator: String = Locale.current.groupingSeparator ?? ",",
                          locale: Locale = .current) -> Result {
         var variables: [String: Double] = [:]
-        var previousValues: [Double] = []
+        var previous: Double?
+        var total = 0.0
+        var count = 0
+        var constants: [String: Double?] = [:]
         var results: [LineResult] = []
 
-        for line in source.components(separatedBy: .newlines) {
+        for line in source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
                 results.append(LineResult(source: line, value: nil, variable: nil))
@@ -38,18 +41,29 @@ enum ScratchpadCalculationEvaluator {
             let assignment = assignmentParts(in: trimmed)
             let expression = assignment?.expression ?? trimmed
             let expanded = substitute(expression, variables: variables,
-                                       previousValues: previousValues,
+                                       previous: previous, total: total, count: count,
                                        decimalSeparator: decimalSeparator)
-            let value = evaluateExpression(expanded,
+            let value: Double?
+            if let cached = constants[expanded] { value = cached }
+            else {
+                value = evaluateExpression(expanded,
                                            decimalSeparator: decimalSeparator,
                                            groupingSeparator: groupingSeparator,
                                            locale: locale)
+                if !expanded.contains(where: { $0.isLetter || $0 == "_" }) {
+                    constants.updateValue(value, forKey: expanded)
+                }
+            }
             let variable = assignment?.name.lowercased()
             if let value, value.isFinite {
                 if let variable {
                     variables[variable] = value
                 }
-                previousValues.append(value)
+                previous = value
+                total += value
+                count += 1
+            } else if let variable {
+                variables.removeValue(forKey: variable)
             }
             results.append(LineResult(source: line, value: value, variable: variable))
         }
@@ -69,10 +83,8 @@ enum ScratchpadCalculationEvaluator {
         }
         // CommandBarMath intentionally rejects lone numbers in launcher
         // queries. A calculation line may validly be a literal or variable.
-        return CommandBarMath.evaluate(expression + "+0",
-                                       decimalSeparator: decimalSeparator,
-                                       groupingSeparator: groupingSeparator,
-                                       locale: locale)?.value
+        return CommandBarMath.literalValue(expression, decimalSeparator: decimalSeparator,
+                                           groupingSeparator: groupingSeparator)
     }
 
     private struct Assignment {
@@ -81,8 +93,7 @@ enum ScratchpadCalculationEvaluator {
     }
 
     private static func assignmentParts(in line: String) -> Assignment? {
-        let pattern = #"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$"#
-        guard let match = try? NSRegularExpression(pattern: pattern).firstMatch(
+        guard let match = assignmentPattern.firstMatch(
             in: line, range: NSRange(location: 0, length: (line as NSString).length)),
               match.numberOfRanges == 2 + 1 else { return nil }
         let value = line as NSString
@@ -91,16 +102,17 @@ enum ScratchpadCalculationEvaluator {
         return Assignment(name: name, expression: expression)
     }
 
+    private static let assignmentPattern = try! NSRegularExpression(pattern: #"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$"#)
+
     private static func substitute(_ expression: String,
                                    variables: [String: Double],
-                                   previousValues: [Double],
+                                   previous: Double?, total: Double, count: Int,
                                    decimalSeparator: String) -> String {
         let special: [String: Double?] = [
-            "prev": previousValues.last,
-            "sum": previousValues.isEmpty ? nil : previousValues.reduce(0, +),
-            "avg": previousValues.isEmpty ? nil : previousValues.reduce(0, +) / Double(previousValues.count),
+            "prev": previous,
+            "sum": count == 0 ? nil : total,
+            "avg": count == 0 ? nil : total / Double(count),
         ]
-        let values = variables.merging(special.compactMapValues { $0 }) { current, _ in current }
         let characters = Array(expression)
         var output = ""
         var index = 0
@@ -116,7 +128,9 @@ enum ScratchpadCalculationEvaluator {
                 index += 1
             }
             let word = String(characters[start..<index])
-            if let value = values[word.lowercased()] {
+            let name = word.lowercased()
+            if !(start > 0 && (characters[start - 1].isNumber || characters[start - 1] == ".")),
+               let value = variables[name] ?? special[name] ?? nil {
                 output += localizedNumber(value, decimalSeparator: decimalSeparator)
             } else {
                 output += word
@@ -126,9 +140,8 @@ enum ScratchpadCalculationEvaluator {
     }
 
     private static func localizedNumber(_ value: Double, decimalSeparator: String) -> String {
-        let raw = String(value)
-        let separator = decimalSeparator.isEmpty ? "." : decimalSeparator
-        return raw.replacingOccurrences(of: ".", with: separator)
+        CommandBarMath.reusableExpression(for: .init(formatted: "", value: value, closingBrackets: ""),
+                                          decimalSeparator: decimalSeparator)
     }
 
     private static func isIdentifierStart(_ character: Character) -> Bool {
