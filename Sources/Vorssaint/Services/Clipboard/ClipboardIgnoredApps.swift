@@ -41,7 +41,9 @@ final class ClipboardIgnoredApps: ObservableObject {
     /// makes could not run.
     private var historyPanelWasKey = false
 
-    private init() {
+    /// Independent consumers need separate activation windows; sharing one
+    /// tracker would let either poll consume the other's exclusion evidence.
+    init() {
         reload()
     }
 

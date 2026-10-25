@@ -379,6 +379,8 @@ if (( TEST )); then
         Sources/Vorssaint/Services/QuickTools/ScratchpadCalculationEvaluator.swift
         Sources/Vorssaint/Services/QuickTools/ScratchpadCurrency.swift
         Sources/Vorssaint/Services/QuickTools/ScratchpadExchangeRates.swift
+        Sources/Vorssaint/Services/QuickTools/ScratchpadClipboardCollector.swift
+        Sources/Vorssaint/Services/Clipboard/ClipboardIgnoredApps.swift
         Sources/Vorssaint/Services/KillProcess/KillProcessSupport.swift
         Sources/Vorssaint/Services/Recorder/RecorderSupport.swift
         Sources/Vorssaint/Services/Recorder/RecorderSampleTiming.swift

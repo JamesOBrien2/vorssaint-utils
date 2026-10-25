@@ -78,6 +78,16 @@ enum ScratchpadFocusedShortcut {
 }
 
 enum ScratchpadSupport {
+    static func clipboardAppend(_ copied: String, to text: String) -> ScratchpadMarkEdit? {
+        let separator = text.isEmpty || text.hasSuffix("\n\n") ? "" : text.hasSuffix("\n") ? "\n" : "\n\n"
+        guard !copied.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              text.count + separator.count + copied.count <= ClipboardHistoryEditing.maxCharacters else { return nil }
+        let replacement = separator + copied
+        let end = (text as NSString).length
+        return ScratchpadMarkEdit(range: NSRange(location: end, length: 0), replacement: replacement,
+                                 selection: NSRange(location: end + (replacement as NSString).length, length: 0))
+    }
+
     /// The fill sits over the existing material: zero preserves the familiar
     /// frosted pad, while one fully covers what is behind the window.
     static let backgroundOpacityRange: ClosedRange<Double> = 0...1
