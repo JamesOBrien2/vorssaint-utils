@@ -106,7 +106,8 @@ struct AgentUsageRecord: Equatable {
     var reportedCost: Bool = false
 
     init(provider: AgentProvider, date: Date, model: String, project: String, session: String,
-         requests: Int = 1, tokens: AgentTokens, cost: Double?, savings: Double, reportedCost: Bool = false) {
+         requests: Int = 1, tokens: AgentTokens, cost: Double?, savings: Double,
+         skills: [AgentSkill: Int] = [:], reportedCost: Bool = false) {
         self.provider = provider
         self.date = date
         self.model = model
@@ -116,6 +117,7 @@ struct AgentUsageRecord: Equatable {
         self.tokens = tokens
         self.cost = cost
         self.savings = savings
+        self.skills = skills
         self.reportedCost = reportedCost
     }
 }
