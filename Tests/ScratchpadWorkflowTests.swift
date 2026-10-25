@@ -73,6 +73,14 @@ enum ScratchpadWorkflowTests {
             let labels = ScratchpadLibraryStrings(language: language)
             suite.expect(ScratchpadLibraryLabel.allCases.allSatisfy { !labels[$0].isEmpty }, "all Scratchpad labels exist for \(language)")
         }
+        let appended = ScratchpadSupport.clipboardAppend("second 🙂", to: "first")
+        suite.expect(appended?.replacement == "\n\nsecond 🙂"
+                     && appended?.selection == NSRange(location: ("first\n\nsecond 🙂" as NSString).length, length: 0),
+                     "clipboard collection separates entries and preserves UTF-16 caret positions")
+        suite.expect(ScratchpadSupport.clipboardAppend("third", to: "first\n")?.replacement == "\nthird"
+                     && ScratchpadSupport.clipboardAppend("third", to: "first\n\n")?.replacement == "third"
+                     && ScratchpadSupport.clipboardAppend(" \n", to: "first") == nil,
+                     "clipboard collection avoids duplicate blank lines and ignores blank copies")
     }
 
     private static func titlesAndDuplicates(_ suite: TestSuite, now: Date) {

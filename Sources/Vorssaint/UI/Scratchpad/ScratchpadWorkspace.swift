@@ -34,6 +34,17 @@ struct ScratchpadWorkspace: View {
     var body: some View {
         VStack(spacing: island ? 5 : 0) {
             navigation
+            if service.isCollectingClipboard {
+                HStack(spacing: 8) {
+                    Label(labels[.collectingClipboard], systemImage: "record.circle.fill")
+                    Text(String(service.clipboardCollectionCount)).monospacedDigit()
+                    Spacer(minLength: 0)
+                    Button(labels[.stopCollection], action: service.stopClipboardCollection)
+                }
+                .font(.system(size: 11)).padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Color.accentColor.opacity(0.12))
+                .accessibilityElement(children: .contain)
+            }
             if service.saveFailed {
                 Label(text.saveFailed, systemImage: "exclamationmark.triangle")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
@@ -123,6 +134,7 @@ struct ScratchpadWorkspace: View {
                     }
                     .help(service.isPinned ? text.closeOnClickOutside : text.keepOpen)
                     .accessibilityLabel(service.isPinned ? text.closeOnClickOutside : text.keepOpen)
+                    .disabled(service.isCollectingClipboard)
                     Button(action: service.hide) {
                         Image(systemName: "xmark.circle.fill").frame(width: 24, height: 24)
                     }
@@ -347,6 +359,17 @@ struct ScratchpadWorkspace: View {
     private var actionsMenu: some View {
         Menu {
             if let pad = service.selectedPad { noteActions(pad); Divider() }
+            if service.isCollectingClipboard {
+                Button(labels[.stopCollection], action: service.stopClipboardCollection)
+            } else {
+                Button(labels[.startCollection]) {
+                    if island { NotchService.shared.perform { service.startClipboardCollection() } }
+                    else { service.startClipboardCollection() }
+                }
+                .disabled(service.selectedPad == nil || service.saveFailed)
+                .help(labels[.collectionHelp])
+            }
+            Divider()
             Menu(labels[.checklistTools]) {
                 Toggle(labels[.createCheckboxOnNewLine], isOn: $service.createsCheckboxOnNewLine)
                 Divider()
