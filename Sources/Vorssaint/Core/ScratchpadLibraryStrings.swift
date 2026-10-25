@@ -10,6 +10,7 @@ enum ScratchpadLibraryLabel: Int, CaseIterable {
     case replaceMessage, folderMessage, liveEditing, failed
     case duplicate, checklistTools, uncheckAll, removeCompleted, createCheckboxOnNewLine
     case previousNote, nextNote
+    case startCollection, stopCollection, collectingClipboard, collectionHelp
 }
 
 struct ScratchpadLibraryStrings {
@@ -20,8 +21,29 @@ struct ScratchpadLibraryStrings {
             let pair = Self.navigation[language]!
             return label == .previousNote ? pair.0 : pair.1
         }
+        if let index = [ScratchpadLibraryLabel.startCollection, .stopCollection, .collectingClipboard, .collectionHelp].firstIndex(of: label) {
+            return Self.clipboard[language]![index]
+        }
         return Self.translations[language]![label.rawValue]
     }
+
+    private static let clipboard: [AppLanguage: [String]] = [
+        .enUS: ["Collect clipboard text", "Stop collecting", "Collecting clipboard", "Open the floating pad and collect new copied text into this note until stopped. The pad stays open."],
+        .ptBR: ["Coletar texto da área de transferência", "Parar coleta", "Coletando área de transferência", "Abre o bloco flutuante e adiciona novos textos copiados a esta nota até parar. O bloco fica aberto."],
+        .es: ["Recopilar texto del portapapeles", "Detener recopilación", "Recopilando portapapeles", "Abre el bloc flotante y añade los nuevos textos copiados a esta nota hasta detenerlo. El bloc permanece abierto."],
+        .fr: ["Collecter le texte du presse-papiers", "Arrêter la collecte", "Collecte du presse-papiers", "Ouvre le bloc flottant et ajoute les nouveaux textes copiés à cette note jusqu’à l’arrêt. Le bloc reste ouvert."],
+        .de: ["Zwischenablagetext sammeln", "Sammlung beenden", "Zwischenablage wird gesammelt", "Öffnet das schwebende Notizfenster und fügt neu kopierten Text bis zum Beenden dieser Notiz hinzu. Das Fenster bleibt offen."],
+        .it: ["Raccogli testo dagli appunti", "Interrompi raccolta", "Raccolta dagli appunti", "Apre il blocco mobile e aggiunge il nuovo testo copiato a questa nota fino all’interruzione. Il blocco resta aperto."],
+        .ja: ["クリップボードのテキストを収集", "収集を停止", "クリップボードを収集中", "フローティングパッドを開き、停止するまで新しくコピーしたテキストをこのノートに追加します。パッドは開いたままになります。"],
+        .ko: ["클립보드 텍스트 수집", "수집 중지", "클립보드 수집 중", "플로팅 메모를 열고 중지할 때까지 새로 복사한 텍스트를 이 노트에 추가합니다. 메모는 열린 상태로 유지됩니다."],
+        .zhHans: ["收集剪贴板文本", "停止收集", "正在收集剪贴板", "打开浮动便笺，将新复制的文本添加到此笔记，直到停止。便笺会保持打开。"],
+        .zhTW: ["收集剪貼簿文字", "停止收集", "正在收集剪貼簿", "開啟浮動便箋，將新複製的文字加入此筆記，直到停止。便箋會保持開啟。"],
+        .zhHK: ["收集剪貼簿文字", "停止收集", "正在收集剪貼簿", "開啟浮動便箋，將新複製的文字加入此筆記，直到停止。便箋會保持開啟。"],
+        .tr: ["Pano metnini topla", "Toplamayı durdur", "Pano toplanıyor", "Kayan notu açar ve durdurulana kadar yeni kopyalanan metni bu nota ekler. Not açık kalır."],
+        .ru: ["Собирать текст из буфера обмена", "Остановить сбор", "Сбор из буфера обмена", "Открывает плавающую заметку и добавляет в неё новый скопированный текст до остановки. Заметка остаётся открытой."],
+        .uk: ["Збирати текст із буфера обміну", "Зупинити збирання", "Збирання з буфера обміну", "Відкриває плаваючу нотатку й додає до неї новий скопійований текст до зупинки. Нотатка залишається відкритою."],
+        .sk: ["Zbierať text zo schránky", "Zastaviť zbieranie", "Zbieranie zo schránky", "Otvorí plávajúcu poznámku a pridáva do nej nový skopírovaný text až do zastavenia. Poznámka zostane otvorená."],
+    ]
 
     private static let navigation: [AppLanguage: (String, String)] = [
         .enUS: ("Previous note", "Next note"),

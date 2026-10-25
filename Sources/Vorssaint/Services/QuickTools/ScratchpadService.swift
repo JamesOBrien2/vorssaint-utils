@@ -33,6 +33,11 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
         didSet { UserDefaults.standard.set(createsCheckboxOnNewLine, forKey: "ScratchpadCreatesCheckboxOnNewLine") }
     }
     var editingPositions: [UUID: ScratchpadEditorPosition] = [:]
+    @Published private(set) var clipboardCollectionTarget: UUID?
+    @Published private(set) var clipboardCollectionCount = 0
+    var isCollectingClipboard: Bool { clipboardCollectionTarget != nil }
+    private var clipboardCollector: ScratchpadClipboardCollector?
+    private var collectionPreviousPin = false
     private let ioQueue = DispatchQueue(label: "com.vorssaint.scratchpad.storage", qos: .utility)
     @Published private(set) var selectedPadID: UUID?
     /// Both pads show this in place until a write succeeds again.
@@ -167,6 +172,7 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     func hide() {
+        stopClipboardCollection()
         guard panel != nil else { return }
         commitEdits()
         removeMonitors()
@@ -209,6 +215,7 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
                 DispatchQueue.main.async {
                     guard self.hasLoaded, self.document == snapshot else { return }
                     self.saveFailed = !succeeded
+                    if !succeeded { self.stopClipboardCollection() }
                 }
             }
         }
@@ -230,6 +237,11 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     private func apply(_ document: ScratchpadDocument, focus: Bool = false) {
+        if let target = clipboardCollectionTarget,
+           target != document.selectedID || !document.openIDs.contains(target)
+            || document.pads.first(where: { $0.id == target })?.deletedAt != nil {
+            stopClipboardCollection()
+        }
         self.document = document
         publishNotes(document)
         selectedPadID = document.selectedID
@@ -493,13 +505,50 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     func toggleSource() { isSourceMode.toggle() }
 
     func togglePin() {
-        guard isVisible else { return }
+        guard isVisible, !isCollectingClipboard else { return }
         isPinned.toggle()
     }
 
     func outsideClickPreferenceDidChange() {
-        guard isVisible else { return }
+        guard isVisible, !isCollectingClipboard else { return }
         isPinned = !closesOnClickOutside
+    }
+
+    func startClipboardCollection() {
+        guard !isCollectingClipboard, !modalInteractionActive, !saveFailed else { return }
+        show(allowsIsland: false)
+        guard isVisible, let target = selectedPadID else { return }
+        collectionPreviousPin = isPinned
+        isPinned = true
+        clipboardCollectionTarget = target
+        clipboardCollectionCount = 0
+        if clipboardCollector == nil { clipboardCollector = ScratchpadClipboardCollector() }
+        clipboardCollector?.start(ownUIActive: { NSApp.keyWindow?.isKeyWindow == true }) { [weak self] copied in
+            guard let self, self.clipboardCollectionTarget == target else { return false }
+            guard self.selectedPadID == target, !self.saveFailed else {
+                self.stopClipboardCollection(); return false
+            }
+            guard !self.modalInteractionActive, self.textView?.hasMarkedText() != true else { return false }
+            guard let edit = ScratchpadSupport.clipboardAppend(copied, to: self.text) else {
+                self.stopClipboardCollection(); return false
+            }
+            if let view = self.textView, view.window === self.panel,
+               let coordinator = view.delegate as? ScratchpadEditor.Coordinator {
+                coordinator.apply(edit)
+            } else {
+                self.updateText(self.text + edit.replacement, for: target)
+            }
+            self.clipboardCollectionCount += 1
+            return true
+        }
+    }
+
+    func stopClipboardCollection() {
+        guard isCollectingClipboard else { return }
+        clipboardCollector?.stop()
+        clipboardCollectionTarget = nil
+        isPinned = collectionPreviousPin
+        flushSave()
     }
 
     /// Activate for dialog input and return focus to the originating host.
@@ -784,6 +833,7 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     func restoreBackup(from window: NSWindow?) {
+        stopClipboardCollection()
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
         filePanel(panel, from: window) { [weak self] url in
@@ -853,6 +903,10 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
                 // The find bar puts itself away on Esc and hands the keyboard
                 // back to the text; the pad hides on the next one.
                 if PlainTextEditor.findBarHasKeyboard(in: panel) { return event }
+                if self.isCollectingClipboard {
+                    self.stopClipboardCollection()
+                    return nil
+                }
                 self.hide()
                 return nil
             }
