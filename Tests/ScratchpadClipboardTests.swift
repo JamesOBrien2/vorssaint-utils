@@ -36,7 +36,7 @@ enum ScratchpadClipboardTests {
 
     private static func persistence(_ suite: TestSuite) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let domain = "ScratchpadClipboardTests.\(UUID().uuidString)"
+        let domain = "com.vorssaint.tests.scratchpad-clipboard.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: domain)!
         defer { try? FileManager.default.removeItem(at: directory); defaults.removePersistentDomain(forName: domain) }
         do {
@@ -61,7 +61,7 @@ enum ScratchpadClipboardTests {
     }
 
     private static func capture(_ suite: TestSuite) {
-        let domain = "ScratchpadCollectorTests.\(UUID().uuidString)"
+        let domain = "com.vorssaint.tests.scratchpad-collector.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: domain)!
         defaults.set(["test.ignored"], forKey: DefaultsKey.clipboardHistoryIgnoredApps)
         defaults.set(true, forKey: DefaultsKey.clipboardHistoryFilterSensitiveText)
